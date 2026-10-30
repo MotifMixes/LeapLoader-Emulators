@@ -1,0 +1,10 @@
+build/
+package/
+*.o
+__pycache__/
+.claude/
+# never: games, BIOS dumps, saves
+*.nes
+*.gb
+*.gbc
+*.sav
