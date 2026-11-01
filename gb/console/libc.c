@@ -1,10 +1,12 @@
 /* The parts of the C library the console build needs that newlib would bring
    with gp-relative small data (malloc, stdio, errno, ...): on the console gp
-   is the BIOS's. String and math functions still come from newlib (they use
+   is the BIOS's. String functions are ours (common/llstring.h); math still comes from newlib (it uses
    no gp; build.sh checks the linked program for any gp access). */
 #include <stdarg.h>
 #include <stddef.h>
 #include <string.h>
+#include "../../common/llstring.h"  /* (not newlib's ARC string functions: see there) */
+#include "../../common/lldiv.h"     /* (not libgcc's ARC division: see there) */
 
 /* ---- memory: a bump allocator over .bss end .. __heap_end. free() takes
    back only the newest block (snes9x frees its temporary buffers so). */

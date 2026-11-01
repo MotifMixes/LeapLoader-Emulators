@@ -10,7 +10,8 @@ R=$(cd "$(dirname "$0")" && pwd)
 ARC=${ARC:-arc-elf32-}
 export ARC
 CC="$R/cc.sh"
-CF="-mcpu=arc600 -mmul64 -mbarrel-shifter -mnorm -mswap -mno-sdata -O2 -fomit-frame-pointer -DLL -w"
+# -fno-branch-count-reg: no zero-overhead (LP) loops (see link: they broke the apps on a real console)
+CF="-mcpu=arc600 -fno-branch-count-reg -mmul64 -mbarrel-shifter -mnorm -mswap -mno-sdata -O2 -fomit-frame-pointer -DLL -w"
 LINK="-mcpu=arc600 -mmul64 -mbarrel-shifter -mnorm -mswap -nostartfiles"
 
 # link NAME DIR OBJS...: DIR/console's link.ld -> build/NAME.elf -> build/NAME/code.bin
@@ -22,6 +23,11 @@ link() {
   "${ARC}objdump" -d "$R/build/$name.elf" | awk '/^[0-9a-f]+ <.*>:$/{fn=$2}
     /[^a-z_](gp|r26)([^a-z0-9]|$)/ && !/mov(_s)?[ \t]+r[0-9]+,gp[ \t]*$/{print fn, $0}' > "$R/build/$name.gp"
   if [ -s "$R/build/$name.gp" ]; then echo "$name: gp used (see build/$name.gp)"; exit 1; fi
+  # no zero-overhead loops: on a real Leapster 2 GCC's and newlib's/libgcc's broke the apps (fine in
+  # Ribbit); CF has -fno-branch-count-reg, common/llstring.h and lldiv.h replace the library ones
+  "${ARC}objdump" -d "$R/build/$name.elf" | awk '/^[0-9a-f]+ <.*>:$/{fn=$2}
+    /\tlp(ne|eq|nz|z|hs|lo)?\t|lp_count/{print fn, $0}' > "$R/build/$name.lp"
+  if [ -s "$R/build/$name.lp" ]; then echo "$name: zero-overhead loops (see build/$name.lp)"; exit 1; fi
   "${ARC}objcopy" -O binary -j .text -j .rodata -j .data "$R/build/$name.elf" "$R/build/$name.bin"
 }
 

@@ -10,8 +10,9 @@ Leapster games; on the console they appear in LeapLoader's menu as blue buttons.
 | **Game Boy** | [gnuboy](https://github.com/rofl0r/gnuboy) 1.0.4 (rofl0r's revival) | `.gb`, `.gbc` | `GB\`, `GBC\` |
 
 **Status:** tested in the [Ribbit](https://github.com/MotifMixes/ribbit) emulator (Leapster 2 BIOS 0.6):
-both run at full speed there, with sound, saves, touch and the menus. **Not yet tested on a real
-Leapster 2.** Use at your own risk.
+both run at full speed there, with sound, saves, touch and the menus. On a real Leapster 2 the NES
+menu and games work (2026-11-01, after the fixes under *Building*); Game Boy less tested there.
+Use at your own risk.
 
 No games come with them: bring your own `.nes`, `.gb` and `.gbc` files.
 
@@ -84,6 +85,16 @@ its objects in `build/`. `VERSION` sets the packages' version.
 
 `cc.sh` wraps the compiler: on the Leapster, the low word of a MUL64 product is read from MMID, not
 MLO, so the generated assembly is fixed up before it is assembled.
+
+What only showed on a real console (Ribbit runs both right):
+
+* **No zero-overhead loops.** GCC's `lp` loops and newlib's/libgcc's hand-written ones broke the apps
+  (names mixed, tiles scrambled, games crashed). `CF` has `-fno-branch-count-reg`, `common/llstring.h`
+  and `common/lldiv.h` replace the library's string and division functions, and the build stops if
+  anything linked still has an `lp`.
+* **The picture goes to VRAM with `st.di`.** Drawn straight into VRAM through the data cache, it reached
+  the LCD late or not at all; it is drawn in RAM and copied (`show()`). File loads keep clear of the
+  cache too (`common/llcache.h`).
 
 ## Layout
 

@@ -39,6 +39,8 @@ struct llm_theme {
 #define LLM_QMAX 12
 #define LLM_MAX 2048
 #define LLM_FRAME (16000000 / 20)  /* 20 fps, as the menu */
+#define LLM_MARQUEE_REST (16000000 * 3 / 2)  /* a long name's marquee: 1.5 s still at each end */
+#define LLM_MARQUEE_SPEED 40                 /* and 40 pixels a second between */
 
 static const char *const llm_frog[] = {
     "..GGG......GGG..", ".GGGGG....GGGGG.", ".GdwGGGGGGGGdwG.", ".GddGGGGGGGGddG.",
@@ -404,7 +406,8 @@ static int llm_pick(const struct llm_theme *t, const char *names, int stride, in
     static short shown[LLM_MAX];
     static char q[LLM_QMAX + 1];
     char nm[64], line[32];
-    int m = 0, at = 0, i, scroll = 0, rest = 30, launch = 0, rebuild = 1;
+    int m = 0, at = 0, i, scroll, launch = 0, rebuild = 1;
+    unsigned long long since = now;  /* when the chosen name's marquee started */
     u32 held = keys(), e;
     unsigned long long again = now + 16000000 / 3, due = now;  /* a button still held is no new press */
     if (n > LLM_MAX) n = LLM_MAX;
@@ -418,7 +421,7 @@ static int llm_pick(const struct llm_theme *t, const char *names, int stride, in
                     if (i == want) at = m;
                     shown[m++] = i;
                 }
-            scroll = 0, rest = 30;
+            since = now;
         }
         e = llm_keys(&held, &again);
         {
@@ -449,7 +452,7 @@ static int llm_pick(const struct llm_theme *t, const char *names, int stride, in
             else if (m && (e & K_LEFT)) at = at >= LLM_ROWS ? (at / LLM_ROWS - 1) * LLM_ROWS : 0;
             else if (m && (e & K_RIGHT))
                 at = (at / LLM_ROWS + 1) * LLM_ROWS < m ? (at / LLM_ROWS + 1) * LLM_ROWS : m - 1;
-            if (at != old) scroll = 0, rest = 30;
+            if (at != old) since = now;
         } else if (e & K_HOME) to_menu();
         else if (e & K_PAUSE) {
             llm_sound(LLM_SND_SELECT);
@@ -487,14 +490,18 @@ static int llm_pick(const struct llm_theme *t, const char *names, int stride, in
             w = 6 * (int)strlen(nm) - 1;
             if (k == at && !(launch & 2)) llm_round(LLM_X - 3, y - 3, LLM_W + 6, LLM_H + 7, 4, LLM_GLOW);
             llm_pill(t, LLM_X, y, LLM_W, LLM_H);
-            llm_shadowed(LLM_X + LLM_TEXT - (k == at ? scroll : 0), y + 7, nm, 0xFFF, t->ink, 1,
-                         LLM_X + LLM_TEXT, LLM_X + LLM_W - LLM_TEXT);
-            if (k == at && w > LLM_W - 2 * LLM_TEXT) {  /* marquee, as the menu: rest, scroll, rest, back */
-                int over = w - (LLM_W - 2 * LLM_TEXT);
-                if (rest) rest--;
-                else if (scroll >= over) scroll = 0, rest = 30;
-                else if ((scroll += 2) >= over) scroll = over, rest = 30;
+            scroll = 0;
+            if (k == at && w > LLM_W - 2 * LLM_TEXT) {
+                /* marquee, as the menu: rest 1.5 s, scroll at 40 px/s, rest, back. Timed on the
+                   clock, not counted in frames: on the console a frame takes longer than in the
+                   emulator, and counted frames left the names standing still. */
+                unsigned long long over = w - (LLM_W - 2 * LLM_TEXT), rest = LLM_MARQUEE_REST,
+                                   run = over * 16000000 / LLM_MARQUEE_SPEED, e = now - since;
+                if (e >= 2 * rest + run) since = now, e = 0;
+                scroll = e < rest ? 0 : e < rest + run ? (int)((e - rest) * LLM_MARQUEE_SPEED / 16000000) : (int)over;
             }
+            llm_shadowed(LLM_X + LLM_TEXT - scroll, y + 7, nm, 0xFFF, t->ink, 1,
+                         LLM_X + LLM_TEXT, LLM_X + LLM_W - LLM_TEXT);
         }
         llm_tool(t, LLM_TOP, llm_search_icon);
         if (m > LLM_ROWS) {

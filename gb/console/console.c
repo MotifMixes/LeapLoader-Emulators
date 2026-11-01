@@ -60,12 +60,6 @@ static int b_findfirst(const char *pattern, void *info)
 { return ((int (*)(const char *, void *))svc(SVC_FILE, 0x74))(pattern, info); }
 static int b_findnext(int h, void *info) { return ((int (*)(int, void *))svc(SVC_FILE, 0x78))(h, info); }
 static void b_findclose(void *info) { ((void (*)(void *))svc(SVC_FILE, 0x7C))(info); }
-static void flush_lines(const void *p, int n)
-{
-    u32 a = (u32)p & ~15u, e = (u32)p + n, s;
-    for (; a < e; a += 16) __asm__ volatile("sr %0, [0x4c]" : : "r"(a) : "memory");
-    do __asm__ volatile("lr %0, [0x48]" : "=r"(s)); while (s & 0x100);
-}
 static void b_awake(void) { ((void (*)(void))svc(SVC_SYS, 0x14))(); }
 
 /* ---- hardware */
@@ -107,9 +101,26 @@ static void tick(void)
     if (t > now) now = t;
 }
 
-/* ---- the picture: 160 x 160 at 12 bpp, two pixels in three bytes (g0b0, r0r1, g1b1) */
-static unsigned char *const frame = (unsigned char *)0x03000000;
-static void show(void) { flush_lines(frame, 160 * 240); }
+/* ---- the picture: 160 x 160 at 12 bpp, two pixels in three bytes (g0b0, r0r1, g1b1).
+   Drawn in RAM (frame) and copied to the LCD's VRAM at 0x0300_0000 with uncached stores
+   (show), as the SDK's ll_show. Drawn straight into VRAM and written back a line at a time
+   with sr [0x4C] (dc_fldl), the real console showed black blocks, leftover text and
+   streaks (2026-11-01): that write-back doesn't happen there, so lines reached the LCD
+   only when the cache evicted them. Ribbit doesn't model the caches. */
+#include "../../common/llcache.h"
+#define VRAM 0x03000000u
+static u32 frame_words[160 * 240 / 4];
+static unsigned char *const frame = (unsigned char *)frame_words;
+static void show(void)
+{
+    const u32 *w = frame_words, *e = w + sizeof frame_words / 4;
+    u32 a = VRAM;
+    for (; w < e; w += 4, a += 16) {
+        u32 w0 = w[0], w1 = w[1], w2 = w[2], w3 = w[3];
+        __asm__ volatile("st.di %0, [%1]\n\tst.di %2, [%1, 4]\n\tst.di %3, [%1, 8]\n\tst.di %4, [%1, 12]"
+                         : : "r"(w0), "r"(a), "r"(w1), "r"(w2), "r"(w3) : "memory");
+    }
+}
 static void b_lcd_base(u32 vram) { ((void (*)(u32))svc(SVC_LCD, 0x28))(vram); }
 
 /* ---- sound (as the SNES port) */
@@ -304,9 +315,11 @@ static int read_file(const char *path, unsigned char *buf, int max)
     void *f = b_fopen(path, "rb");
     int n = 0, k;
     if (!f) return -1;
+    ll_cache_clean();
     while (n <= max && (k = b_fread(buf + n, 1, max + 1 - n < 0x8000 ? max + 1 - n : 0x8000, f)) > 0)
         n += k;
     b_fclose(f);
+    if (n > 0) ll_cache_reload(buf, n);
     return n;
 }
 
@@ -477,6 +490,7 @@ static void save_sav(int force)
     if (s == sav_sum && !force) return;
     sav_sum = s;
     if ((f = b_fopen(sav, "wb"))) {
+        ll_cache_clean();  /* (the file service reads the buffer past the cache) */
         b_fwrite(ram.sbank, 1, n, f);
         b_fclose(f);
     }
@@ -582,7 +596,7 @@ void llmain(void)
     int sel = 0;
     memset(__bss_start, 0, __bss_end - __bss_start);
     tick();
-    b_lcd_base((u32)frame);
+    b_lcd_base(VRAM);
     heap0 = ll_heap_mark();
     pcm_start();
     for (;;) {
