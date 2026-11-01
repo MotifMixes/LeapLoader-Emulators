@@ -400,6 +400,8 @@ static void llm_keyboard(const struct llm_theme *t, char *q)
     while (keys()) tick();
 }
 
+static void llv_menu(void);  /* (llvol.h, included after this file) */
+
 /* The list: returns the index (into names) of the ROM to start. */
 static int llm_pick(const struct llm_theme *t, const char *names, int stride, int n, int sel)
 {
@@ -510,6 +512,7 @@ static int llm_pick(const struct llm_theme *t, const char *names, int stride, in
         }
         snprintf(line, sizeof line, "Page %d/%d", m ? at / LLM_ROWS + 1 : 0, (m + LLM_ROWS - 1) / LLM_ROWS);
         llm_footer(t, line, t->foot);
+        llv_menu();  /* the volume keys and panel (llvol.h) */
         llm_present();
         llm_wait(&due);
     }

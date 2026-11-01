@@ -319,7 +319,6 @@ static int read_file(const char *path, unsigned char *buf, int max)
     while (n <= max && (k = b_fread(buf + n, 1, max + 1 - n < 0x8000 ? max + 1 - n : 0x8000, f)) > 0)
         n += k;
     b_fclose(f);
-    if (n > 0) ll_cache_reload(buf, n);
     return n;
 }
 
@@ -365,6 +364,7 @@ static u32 wait_keys(void)
 /* ---- the ROM list, drawn like LeapLoader's menu (../../common/llmenu.h) */
 #define LLM_LCD frame
 #include "../../common/llmenu.h"
+#include "../../common/llvol.h"
 static const struct llm_theme theme = {"Game Boy", "gnuboy", 0x020, 0x6A4, 0x713, 0xB25, 0xE7A, 0x020, 0x401, 0xCE8, 0x020, 0x020, 0xAD8, 0x8C3, 0x130};
 
 static int pick(int sel)
@@ -380,29 +380,6 @@ static int pick(int sel)
     }
 }
 
-/* ---- volume (as the SNES port) */
-static const unsigned short vol_gain[] = {0, 11, 16, 23, 32, 45, 64, 91, 128, 181, 256};  /* /256 */
-#define VOL_MAX 10
-static int vol = VOL_MAX;
-static int vol_show;
-static void vol_keys(u32 k)
-{
-    static u32 held, t;
-    u32 v = k & (K_VOLUP | K_VOLDN);
-    if (v != held) held = v, t = 0;
-    else if (v) t++;
-    if (!v || (t && (t < 20 || t % 6))) return;
-    if (v == K_VOLUP && vol < VOL_MAX) vol++;
-    if (v == K_VOLDN && vol > 0) vol--;
-    vol_show = 90;
-}
-static void vol_bar(void)
-{
-    int i;
-    fill(4, 4, 4 + VOL_MAX * 6, 10, 0x000);
-    for (i = 0; i < VOL_MAX; i++)
-        fill(7 + i * 6, 7 + (VOL_MAX - 1 - i) / 3, 4, 4 - (VOL_MAX - 1 - i) / 3, i < vol ? 0x0F0 : 0x444);
-}
 
 /* ---- gnuboy's frontend */
 struct fb fb;
@@ -416,7 +393,7 @@ void emu_reset(void), emu_step(void), lcd_begin(void), sound_mix(void);
 int pcm_submit(void)
 {
     u32 w = ring_wr, i;
-    int g = vol_gain[vol];
+    int g = llv_gain[llv_level];
     for (i = 0; i < (u32)pcm.pos && w - ring_rd < RING - 1; i++)
         ring[w++ & (RING - 1)] = (pcm.buf[i] - 128) * g;
     ring_wr = w;
@@ -550,8 +527,7 @@ static void play(int i)
     for (f = 0;; f++) {
         u32 k = keys();
         map(k);
-        vol_keys(k);
-        if (vol_show) vol_show--;
+        llv_keys(k);
         if ((k & (K_HOME | K_PAUSE)) == (K_HOME | K_PAUSE)) {
             if (++quit >= 120) break;
         } else
@@ -576,7 +552,7 @@ static void play(int i)
         if (!(R_LCDC & 0x80)) cpu_emulate(32832);
         while (R_LY > 0) emu_step();
         if (fb.enabled) {
-            if (vol_show) vol_bar();
+            { int dy = llv_offset(); if (dy < LLV_HIDE) llv_draw(dy, fill); }  /* the volume panel (llvol.h) */
             show();
             ll_drawn++;
         }
@@ -599,6 +575,7 @@ void llmain(void)
     b_lcd_base(VRAM);
     heap0 = ll_heap_mark();
     pcm_start();
+    llv_load();  /* the level LeapLoader's menu left (llvol.h) */
     for (;;) {
         sel = pick(sel);
         play(sel);
