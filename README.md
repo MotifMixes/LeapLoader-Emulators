@@ -16,6 +16,15 @@ Use at your own risk.
 
 No games come with them: bring your own `.nes`, `.gb` and `.gbc` files.
 
+**Experimental: Game Boy Advance and Super Nintendo.** Preview builds (gpSP with an ARC dynarec, and
+a heavily modified Snes9x 1.39) are on the
+[Releases](https://github.com/MotifMixes/LeapLoader-Emulators/releases) page with their sources. They
+run in Ribbit but have not been tested on a real Leapster 2, and neither runs at full speed with every
+frame drawn yet: they skip drawing frames to keep the game at full speed. The release notes list their
+limitations and the plans (hand-written ARC cores for SNES, and a Genesis emulator). The SNES app is
+under the Snes9x licence (non-commercial use only), not the GPL. Their sources aren't in this
+repository yet.
+
 ## Installing
 
 LeapLoader 0.2.4 and later come with both emulators: they are on LeapLoader's list already, so
