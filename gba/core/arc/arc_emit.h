@@ -135,12 +135,11 @@ static const u8 arm_to_arc_reg[] =
 #define generate_load_imm(ireg, imm)                                          \
   arc_emit_mov_imm(ireg, imm)                                                 \
 
-/* Memory stubs: the pc follows the call as a data word (they return past it;
-   aligned, as the stubs read it with LD) */
+/* Memory stubs. LL: the pc is no longer a data word after the call: the
+   return address -> pc goes into ll_pcmap (cpu_threaded.c) */
 #define generate_mem_call(function_location, pc_value)                        \
-  arc_emit_align4();                                                          \
   generate_function_call(function_location);                                  \
-  arc_emit_data32(pc_value)                                                   \
+  ll_pcmap_add(translation_ptr, (pc_value))                                   \
 
 #define generate_load_pc(ireg, new_pc)                                        \
   arc_emit_mov_imm(ireg, new_pc)                                              \
@@ -178,10 +177,9 @@ static const u8 arm_to_arc_reg[] =
   else                                                                        \
   {                                                                           \
     arc_emit_cmpi(reg_cycles, 0);                                             \
-    arc_emit_align4();                                                        \
     arc_emit_blcc(ARC_LT, update_trampoline + 8);                             \
+    ll_pcmap_add(translation_ptr, (new_pc));                                  \
     arc_emit_b_filler(writeback_location);                                    \
-    arc_emit_data32(new_pc);                                                  \
   }                                                                           \
 
 /* sub.f sets the flags for the bllt (a cmp would repeat it) */
@@ -190,10 +188,9 @@ static const u8 arm_to_arc_reg[] =
   {                                                                           \
     arc_emit_op_ri(4, ARC_SUB, 1, reg_cycles, reg_cycles, cycle_count);       \
     cycle_count = 0;                                                          \
-    arc_emit_align4();   /* (the word after the b is read with LD) */         \
     arc_emit_blcc(ARC_LT, update_trampoline + 8);                             \
+    ll_pcmap_add(translation_ptr, (new_pc));                                  \
     arc_emit_b_filler(writeback_location);                                    \
-    arc_emit_data32(new_pc);                                                  \
   }                                                                           \
   else                                                                        \
   {                                                                           \
@@ -306,11 +303,15 @@ static const u8 arm_to_arc_reg[] =
     arc_emit_mov_cc_u6(ARC_VS, reg_v_cache, 1);                               \
   }                                                                           \
 
+/* LL: rlc b, u6 (b = u6 << 1 | C): the carry in one 4-byte instruction */
+#define arc_emit_rlc_u6(b, u6)                                                \
+  arc_emit_raw32(0x206F000B | (((b) & 7) << 24) | (((b) >> 3) << 12) |       \
+   ((u6) << 6))                                                               \
+
 #define generate_op_add_cv_flags()                                            \
   if(check_generate_c_flag)                                                   \
   {                                                                           \
-    arc_emit_mov_imm(reg_c_cache, 0);                                         \
-    arc_emit_mov_cc_u6(ARC_CS, reg_c_cache, 1);                               \
+    arc_emit_rlc_u6(reg_c_cache, 0);                                          \
   }                                                                           \
   if(check_generate_v_flag)                                                   \
   {                                                                           \

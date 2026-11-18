@@ -65,7 +65,7 @@ link gb gb "$o/entry.o" "$o/console.o" "$o/stubs.o" "$o/libc.o" "$o"/core_*.o
 # ---- Game Boy Advance: gpSP (libretro's gpsp, GPL-2) with an ARC600 dynarec (gba/core/arc), #ifdef LL
 o=$R/build/gba; rm -rf "$o"; mkdir -p "$o"
 AF="-DNDEBUG -DHAVE_DYNAREC -DARC_ARCH -DLL_ROM_CACHE_KB=1024 -DSOUND_BUFFER_BITS=12 -DLL_MIX_SHIFT=1 -DLL_FOLD_HBLANK
-    -DARC_DC_FLUSH_ALL -ffunction-sections -I$R/gba/core -I$R/gba/core/libretro/libretro-common/include
+    -DARC_DC_FLUSH_ALL -DLL_VSKIP -ffunction-sections -I$R/gba/core -I$R/gba/core/libretro/libretro-common/include
     -I$R/gba/core/libretro -include retro_inline.h"
 for f in main gba_memory savestate input sound cheats memmap serial gbp rfu serial_proto gba_cc_lut cpu_threaded; do
   "$CC" "$R/gba/core/$f.c" "$o/core_$f.o" $CF $AF &

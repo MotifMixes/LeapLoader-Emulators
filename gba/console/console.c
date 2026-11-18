@@ -462,7 +462,16 @@ static inline u32 lcd_pair(u32 a, u32 b, u32 c)
     u32 x = ((a | c << 16) >> 1 & 0x7BEF7BEF) + ((b | b << 16) >> 1 & 0x7BEF7BEF);
     return (x & 0xF000) | ((x >> 20) & 0xF00) | ((x >> 3) & 0xF000F0) | ((x >> 1) & 0xF000F);
 }
+static inline u32 lcd_conv(u32 x)
+{
+    return (x & 0xF000) | ((x >> 20) & 0xF00) | ((x >> 3) & 0xF000F0) | ((x >> 1) & 0xF000F);
+}
 static u32 lcd_hash[160];
+/* -DLL_VSKIP: a line the core did not draw again (same inputs as when it was drawn) is
+   still on the LCD; ll_vskip_invalidate makes the core draw lines again after they were
+   drawn over (list, volume panel, prompt). */
+void ll_scanline_same(u32 vcount) { (void)vcount; }
+extern void ll_vskip_invalidate(u32 from, u32 to);
 void ll_scanline_out(u32 vcount, const u16 *line)
 {
     u32 *w = (u32 *)VRAM + vcount * 60;
@@ -474,9 +483,14 @@ void ll_scanline_out(u32 vcount, const u16 *line)
         h = (((((h ^ q[x]) * 0x01000193) ^ q[x + 1]) * 0x01000193 ^ q[x + 2]) * 0x01000193 ^ q[x + 3]) * 0x01000193;
     if (h == lcd_hash[vcount]) return;
     lcd_hash[vcount] = h;
-    for (x = 0; x < 20; x++, s += 12, w += 3) {
-        u32 p0 = lcd_pair(s[0], s[1], s[2]), p1 = lcd_pair(s[3], s[4], s[5]);
-        u32 p2 = lcd_pair(s[6], s[7], s[8]), p3 = lcd_pair(s[9], s[10], s[11]);
+    q = (const u32 *)line;
+    /* word loads (the line is 4-byte aligned): h = both pixels of a word halved, then
+       each lcd_pair (a+b)/2 | (b+c)/2 << 16 is two adds of shifted words */
+    for (x = 0; x < 20; x++, q += 6, w += 3) {
+        u32 h0 = q[0] >> 1 & 0x7BEF7BEF, h1 = q[1] >> 1 & 0x7BEF7BEF, h2 = q[2] >> 1 & 0x7BEF7BEF;
+        u32 h3 = q[3] >> 1 & 0x7BEF7BEF, h4 = q[4] >> 1 & 0x7BEF7BEF, h5 = q[5] >> 1 & 0x7BEF7BEF;
+        u32 p0 = lcd_conv(h0 + (h0 >> 16) + (h1 << 16)), p1 = lcd_conv((h1 >> 16) + h2 + (h2 << 16));
+        u32 p2 = lcd_conv(h3 + (h3 >> 16) + (h4 << 16)), p3 = lcd_conv((h4 >> 16) + h5 + (h5 << 16));
         /* st.di: the LCD reads VRAM past the data cache (cached stores reach it late or never) */
         __asm__ volatile("st.di %0, [%3]\n\tst.di %1, [%3, 4]\n\tst.di %2, [%3, 8]"
                          : : "r"(p0 | p1 << 24), "r"(p1 >> 8 | p2 << 16), "r"(p2 >> 16 | p3 << 8), "r"(w) : "memory");
@@ -597,6 +611,7 @@ static void play(int i)
     read_file(sav, gamepak_backup, sizeof gamepak_backup);
     sav_sum = sum(gamepak_backup, sav_size());
     memset(lcd_hash, 0, sizeof lcd_hash);
+    ll_vskip_invalidate(0, 160);
     adapt = 1;
 
     memset(frame, 0, 160 * 240);
@@ -630,12 +645,14 @@ static void play(int i)
         {
             int dy = llv_offset(), y0 = LLV_Y + dy;  /* the volume panel (llvol.h) over the game's rows */
             if (drawing && dy < LLV_HIDE)
-                grab_rows(y0, 160), llv_draw(dy, fill), show_rows(y0, 160), memset(lcd_hash + y0, 0, (160 - y0) * sizeof *lcd_hash);
+                grab_rows(y0, 160), llv_draw(dy, fill), show_rows(y0, 160), memset(lcd_hash + y0, 0, (160 - y0) * sizeof *lcd_hash),
+                ll_vskip_invalidate(y0, 160);
         }
         if (drawing) ll_drawn++;
         if (menu_hold) {  /* (every line is drawn again after it: none is "unchanged") */
             grab_rows(34, 122), llm_back_prompt(menu_hold, 150), show_rows(34, 122);
             memset(lcd_hash, 0, sizeof lcd_hash);
+            ll_vskip_invalidate(0, 160);
         }
         /* the sound into the ring: mono, without its constant offset (the GBA's speaker
            is AC-coupled; games leave large offsets), at the volume */

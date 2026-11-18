@@ -3,7 +3,9 @@ LeapLoader-Emulators: licences by part
   nes/core/   QuickNES: GNU LGPL 2.1 or later (file headers); nes/LICENSE (GNU GPL 2 text, as the
               libretro repository ships it); emu2413: its own permissive licence (its header)
   gb/core/    gnuboy: GNU GPL 2 (gb/core/COPYING)
-  the rest    (nes/console, gb/console, common, build.sh, cc.sh): the zlib licence below
+  gba/core/   gpSP: GNU GPL 2 (gba/core/COPYING), including the ARC dynarec (gba/core/arc);
+              gba/core/bios: the open GBA BIOS (Normmatt, the VBA/VBA-M team), GNU GPL 2
+  the rest    (nes/console, gb/console, gba/console, common, build.sh, cc.sh): the zlib licence below
 
 The built apps are distributed under their core's licence (GNU GPL 2).
 

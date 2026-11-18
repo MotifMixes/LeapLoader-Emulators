@@ -21,6 +21,7 @@
 #define REG_SAVE2       (27 * 4)
 #define REG_SAVE3       (28 * 4)
 #define REG_SAVE4       (29 * 4)
+#define REG_SAVE5       (30 * 4)
 #define OAM_UPDATED_OFS (25 * 4)        /* reg[OAM_UPDATED] */
 
 #define CPU_ALERT_HALT  1
@@ -141,12 +142,22 @@
 /* Called (BL) every time the cycle counter runs out. r0: next pc */
 /* from a branch exit: blink -> its b, the new pc is the word after it */
 defsymbl arc_update_gba_w
-  ld r0, [blink, 4]
+  st blink, [r5, REG_SAVE2]
+  collapse_flags
+  save_registers
+  st r6, [r5, REG_SAVE]
+  mov r0, blink                      /* the b after the bllt -> its pc (ll_pcmap) */
+  bl ll_pcmap_find
+  mov r5, reg
+  st r0, [r5, REG_PC]
+  ld r6, [r5, REG_SAVE]
+  b 1f
 defsymbl arc_update_gba
   st r0, [r5, REG_PC]
   st blink, [r5, REG_SAVE2]
   collapse_flags
   save_registers
+1:
   mov r0, r6
   bl update_gba
   mov r5, reg
@@ -325,9 +336,15 @@ cpu_sleep_loop:
 
 /* Code was written: flush the RAM translations and resume at r2 (next pc) */
 smc_write:
-  ld r2, [blink, -4]
-  st r2, [r5, REG_PC]
   mov r0, CPU_ALERT_SMC
+/* A store reported alerts (r0): reg[REG_PC] = the next pc, from the pc map
+   (ll_pcmap: the return address of the stub call -> its pc), then the epilogue */
+store_alert:
+  st r0, [r5, REG_SAVE3]
+  mov r0, blink
+  call_c ll_pcmap_find
+  st r0, [r5, REG_PC]
+  ld r0, [r5, REG_SAVE3]
   b write_epilogue
 
 defsymbl execute_read_cpsr
@@ -508,11 +525,7 @@ defsymbl execute_arm_translate_internal
    directly, other pages through memory_map_read. */
 .macro map_read slow, alignmask, ld_op
   .if \alignmask
-  btst r0, 0
-  bne \slow
-  .endif
-  .if \alignmask == 3
-  btst r0, 1
+  tst r0, \alignmask
   bne \slow
   .endif
   lsr r4, r0, 24
@@ -540,39 +553,34 @@ defsymbl execute_arm_translate_internal
 .endm
 
 .macro load_slow fn
-  ld r1, [blink, -4]                 /* the pc, a data word after the call */
-  st r1, [r5, REG_PC]
+  st blink, [r5, REG_SAVE5]          /* the pc, when C needs it: ll_pc() */
   call_c \fn
+  st 0, [r5, REG_SAVE5]
   mov r3, r0
   j [blink]
 .endm
 
 defsymbl arc_load_u8
-  add blink, blink, 4
   map_read 1f, 0, ldb
 1:
   load_slow read_memory8
 
 defsymbl arc_load_s8
-  add blink, blink, 4
   map_read 1f, 0, ldb.x
 1:
   load_slow read_memory8s
 
 defsymbl arc_load_u16
-  add blink, blink, 4
   map_read 1f, 1, ldw
 1:
   load_slow read_memory16
 
 defsymbl arc_load_s16
-  add blink, blink, 4
   map_read 1f, 1, ldw.x
 1:
   load_slow read_memory16s
 
 defsymbl arc_load_u32
-  add blink, blink, 4
   map_read 1f, 3, ld
 1:
   load_slow read_memory32
@@ -606,40 +614,35 @@ defsymbl arc_load_aligned32
 .endm
 
 .macro store_slow fn
-  ld r2, [blink, -4]
-  st r2, [r5, REG_PC]
+  st blink, [r5, REG_SAVE5]
   call_c \fn
+  st 0, [r5, REG_SAVE5]
   tst r0, r0
-  bne write_epilogue
+  bne store_alert
   j [blink]
 .endm
 
 .macro store_fast st_op, ld_op, alignbits, smc, size
   lsr r4, r0, 24
-  brne r4, 2, 3f
-  bmsk r4, r0, 17
-  .if \alignbits
-  lsr r4, r4, \alignbits
-  asl r4, r4, \alignbits
-  .endif
-  mov r12, ewram
-  add r4, r4, r12
+  brne r4, 3, 3f
+  /* IWRAM (most stores): tags at iwram, data at iwram + 0x8000 (LL: masks and
+     bases as long immediates) */
+  and r4, r0, 0x7FFF & ~((1 << \alignbits) - 1)
+  \ld_op r12, [r4, iwram]
+  add r4, r4, iwram + 0x8000
   \st_op r1, [r4, 0]
-  add r4, r4, 0x40000
-  \ld_op r12, [r4, 0]
   tst r12, r12
   bne \smc
   j [blink]
 3:
-  brne r4, 3, 4f
-  bmsk r4, r0, 14
-  .if \alignbits
-  lsr r4, r4, \alignbits
-  asl r4, r4, \alignbits
-  .endif
-  mov r12, iwram
-  add r4, r4, r12
-  iwram_store \st_op, \ld_op, \smc
+  brne r4, 2, 4f
+  and r4, r0, 0x3FFFF & ~((1 << \alignbits) - 1)
+  add r4, r4, ewram
+  \st_op r1, [r4, 0]
+  \ld_op r12, [r4, 0x40000]
+  tst r12, r12
+  bne \smc
+  j [blink]
 4:
   .if \size > 8
   video_store \st_op, \size
@@ -661,9 +664,12 @@ defsymbl arc_load_aligned32
 /* 16/32-bit stores to palette (0x5), VRAM (0x6) and OAM (0x7), as
    write_memoryN does them; r4 = region. 8-bit ones stay in C (they are special). */
 .macro video_store st_op, size
-  breq r4, 6, 6f
-  breq r4, 7, 7f
-  brne r4, 5, 8f
+  cmp r4, 6
+  beq 6f
+  cmp r4, 7
+  beq 7f
+  cmp r4, 5
+  bne 8f
   .if \size == 16
   and r0, r0, 0x3FE
   .else
@@ -676,6 +682,22 @@ defsymbl arc_load_aligned32
   st r12, [r4, 0]
   mov r12, palette_ram
   add r4, r12, r0
+#ifdef LL_VSKIP
+  .if \size == 16
+  ldw r12, [r4, 0]
+  .else
+  ld r12, [r4, 0]
+  .endif
+  xor r12, r12, r1
+  .if \size == 16
+  bmsk r12, r12, 15
+  .endif
+  breq r12, 0, 1f
+  lsr r12, r0, 9                     /* LL_VSKIP: ll_vchg[2 + offset / 0x200] */
+  add2 r12, ll_vchg + 8, r12
+  st r12, [r12, 0]
+1:
+#endif
   \st_op r1, [r4, 0]
   conv_palette r1
   mov r4, palette_ram_converted
@@ -701,6 +723,23 @@ defsymbl arc_load_aligned32
   .endif
   mov r12, vram
   add r4, r4, r12
+#ifdef LL_VSKIP
+  .if \size == 16
+  ldw r12, [r4, 0]
+  .else
+  ld r12, [r4, 0]
+  .endif
+  xor r12, r12, r1
+  .if \size == 16
+  bmsk r12, r12, 15
+  .endif
+  breq r12, 0, 1f
+  sub r12, r4, vram                  /* LL_VSKIP: ll_vchg[offset >= 0x10000] */
+  lsr r12, r12, 16
+  add2 r12, ll_vchg, r12
+  st r12, [r12, 0]
+1:
+#endif
   \st_op r1, [r4, 0]
   j [blink]
 7:
@@ -711,6 +750,21 @@ defsymbl arc_load_aligned32
   .endif
   mov r12, oam_ram
   add r4, r4, r12
+#ifdef LL_VSKIP
+  .if \size == 16
+  ldw r12, [r4, 0]
+  .else
+  ld r12, [r4, 0]
+  .endif
+  xor r12, r12, r1
+  .if \size == 16
+  bmsk r12, r12, 15
+  .endif
+  breq r12, 0, 1f
+  mov r12, ll_vchg + 16               /* LL_VSKIP: ll_vchg[4] */
+  st r12, [r12, 0]
+1:
+#endif
   \st_op r1, [r4, 0]
   mov r12, 1
   st r12, [r5, OAM_UPDATED_OFS]
@@ -719,17 +773,14 @@ defsymbl arc_load_aligned32
 .endm
 
 defsymbl arc_store_u8
-  add blink, blink, 4
   store_fast stb, ldb, 0, smc_write, 8
   store_slow write_memory8
 
 defsymbl arc_store_u16
-  add blink, blink, 4
   store_fast stw, ldw, 1, smc_write, 16
   store_slow write_memory16
 
 defsymbl arc_store_u32
-  add blink, blink, 4
   ld r4, [r5, REG_SAVE4]             /* alerts left by block stores */
   tst r4, r4
   bne 5f
@@ -738,14 +789,14 @@ defsymbl arc_store_u32
 5:
   mov r12, 0
   st r12, [r5, REG_SAVE4]
-  ld r2, [blink, -4]
-  st r2, [r5, REG_PC]
+  st blink, [r5, REG_SAVE5]
   push r4
   call_c write_memory32
   pop r4
+  st 0, [r5, REG_SAVE5]
   or r0, r0, r4
   tst r0, r0
-  bne write_epilogue
+  bne store_alert
   j [blink]
 
 /* Block transfer stores: no pc here, alerts are kept for the final store

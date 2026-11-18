@@ -231,10 +231,10 @@ static inline void rend_part_tile_Nbpp(u32 bg_comb, u32 px_comb,
 }
 
 // Same as above, but optimized for full tiles. Skip comments here.
-template<typename dtype, rendtype rdtype, bool is8bpp, bool isbase, bool hflip>
+template<typename dtype, rendtype rdtype, bool is8bpp, bool isbase, bool hflip, bool pre = false>
 static inline __attribute__((always_inline)) void render_tile_Nbpp(
   u32 bg_comb, u32 px_comb, dtype *dest_ptr, u16 tile,
-  const u8 *tile_base, int vertical_pixel_flip, const u16 *paltbl
+  const u8 *tile_base, int vertical_pixel_flip, const u16 *paltbl, u32 pre_pix = 0
 ) {
   const u8 *tile_ptr = &tile_base[(tile & 0x3FF) * (is8bpp ? 64 : 32)];
   u16 bgcolor = paltbl[0];
@@ -298,7 +298,7 @@ static inline __attribute__((always_inline)) void render_tile_Nbpp(
       }
     }
   } else {
-    u32 tilepix = eswap32(*(u32*)tile_ptr);
+    u32 tilepix = pre ? pre_pix : eswap32(*(u32*)tile_ptr);
 #ifdef LL
     if (tilepix) {  // We can skip it all if the row is transparent
       u16 tilepal = (tile >> 12) << 4;
@@ -315,7 +315,9 @@ static inline __attribute__((always_inline)) void render_tile_Nbpp(
         dtype v2 = LL_VAL(LL_NIB(2), 2), v3 = LL_VAL(LL_NIB(3), 3);
         dtype v4 = LL_VAL(LL_NIB(4), 4), v5 = LL_VAL(LL_NIB(5), 5);
         dtype v6 = LL_VAL(LL_NIB(6), 6), v7 = LL_VAL(LL_NIB(7), 7);
+#ifndef __i386__
         __asm__ ("" : "+r"(v0), "+r"(v1), "+r"(v2), "+r"(v3), "+r"(v4), "+r"(v5), "+r"(v6), "+r"(v7));
+#endif
         dest_ptr[0] = v0; dest_ptr[1] = v1; dest_ptr[2] = v2; dest_ptr[3] = v3;
         dest_ptr[4] = v4; dest_ptr[5] = v5; dest_ptr[6] = v6; dest_ptr[7] = v7;
       } else {
@@ -363,6 +365,47 @@ static inline __attribute__((always_inline)) void render_tile_Nbpp(
   }
 }
 
+
+#ifdef LL
+/* LL: a run of full tiles. A tile row that is transparent on this line remembers
+   its map bits (index + vertical flip): the next map entries with the same bits are
+   transparent too (VRAM does not change during a line), tested without loading
+   the tile. The next map entry is loaded one tile ahead. */
+template<typename stype, rendtype rdtype, bool isbase, bool is8bpp>
+static inline __attribute__((always_inline)) stype *ll_text_tiles(
+  u32 bg_comb, u32 px_comb, stype *dest_ptr, const u16 *map_ptr, u32 n,
+  const u8 *tile_base, s32 vflip_off, const u16 *paltbl)
+{
+  u32 zkey = ~0U;
+  stype bgv = (rdtype == FULLCOLOR) ? (stype)paltbl[0] : (stype)(0 | bg_comb);
+  u32 next = n ? eswap16(map_ptr[0]) : 0;
+  for (u32 i = 0; i < n; i++, dest_ptr += 8) {
+    u32 tile = next;
+    next = eswap16(map_ptr[i + 1]);
+    if ((tile & 0xBFF) != zkey) {
+      const u8 *tp = &tile_base[(tile & 0x3FF) * (is8bpp ? 64 : 32)];
+      if (tile & 0x800)
+        tp += vflip_off;
+      u32 any = is8bpp ? (((const u32*)tp)[0] | ((const u32*)tp)[1]) : *(const u32*)tp;
+      if (any) {
+        if (tile & 0x400)
+          render_tile_Nbpp<stype, rdtype, is8bpp, isbase, true, !is8bpp>(
+            bg_comb, px_comb, dest_ptr, tile, tile_base, vflip_off, paltbl, any);
+        else
+          render_tile_Nbpp<stype, rdtype, is8bpp, isbase, false, !is8bpp>(
+            bg_comb, px_comb, dest_ptr, tile, tile_base, vflip_off, paltbl, any);
+        continue;
+      }
+      zkey = tile & 0xBFF;
+    }
+    if (isbase) {
+      dest_ptr[0] = bgv; dest_ptr[1] = bgv; dest_ptr[2] = bgv; dest_ptr[3] = bgv;
+      dest_ptr[4] = bgv; dest_ptr[5] = bgv; dest_ptr[6] = bgv; dest_ptr[7] = bgv;
+    }
+  }
+  return dest_ptr;
+}
+#endif
 
 template<typename stype, rendtype rdtype, bool isbase, bool is8bpp>
 static void render_scanline_text_fast(u32 layer,
@@ -456,6 +499,12 @@ static void render_scanline_text_fast(u32 layer,
   // Now render full tiles
   u32 todraw = MIN(end, pixel_run) / 8;
 
+#ifdef LL
+  dest_ptr = ll_text_tiles<stype, rdtype, isbase, is8bpp>(bg_comb, px_comb, dest_ptr,
+    map_ptr, todraw, tile_base, vflip_off, paltbl);
+  map_ptr += todraw;
+  if (0)
+#endif
   for (u32 i = 0; i < todraw; i++, dest_ptr += 8) {
     u16 tile = eswap16(*map_ptr++);
     if (tile & 0x400)   // Tile horizontal flip
@@ -477,6 +526,12 @@ static void render_scanline_text_fast(u32 layer,
     map_ptr = second_ptr;
 
   todraw = end / 8;
+#ifdef LL
+  dest_ptr = ll_text_tiles<stype, rdtype, isbase, is8bpp>(bg_comb, px_comb, dest_ptr,
+    map_ptr, todraw, tile_base, vflip_off, paltbl);
+  map_ptr += todraw;
+  if (0)
+#endif
   for (u32 i = 0; i < todraw; i++, dest_ptr += 8) {
     u16 tile = eswap16(*map_ptr++);
     if (tile & 0x400)   // Tile horizontal flip
@@ -693,6 +748,12 @@ template<typename dsttype, rendtype rdtype, bool isbase>
 static inline void rend_pix_8bpp(
   dsttype *dest_ptr, u8 pval, u32 bg_comb, u32 px_comb, const u16 *pal
 ) {
+#ifdef LL
+  if (isbase && rdtype == FULLCOLOR) {  // (pal[0] is the backdrop: no test)
+    *dest_ptr = pal[pval];
+    return;
+  }
+#endif
   // Alhpa mode stacks previous value (unless rendering the first layer)
   if (pval) {
     if (rdtype == FULLCOLOR)
@@ -759,6 +820,61 @@ static inline void render_affine_background(
     // In wrap mode the entire space is covered, since it "wraps" at the edges
     u8 pval = 0;
     u32 mctr = 0;
+#ifdef LL
+    if (!mosaic) {
+      // LL: two pixels per step, all loads of a step issued before their use.
+      // ((s >> 8) & (wh - 1) == (s & ((wh << 8) - 1)) >> 8.)
+      const u32 msk = (width_height << 8) - 1;
+      const u32 map_pitch = map_size + 4;
+      if (rotate) {
+        while (cnt >= 2) {
+          u32 sx = (u32)source_x & msk, sy = (u32)source_y & msk;
+          u32 tx = (u32)(source_x + dx) & msk, ty = (u32)(source_y + dy) & msk;
+          const u8 *m0 = &map_base[(sx >> 11) + ((sy >> 11) << map_pitch)];
+          const u8 *m1 = &map_base[(tx >> 11) + ((ty >> 11) << map_pitch)];
+          u32 o0 = ((sy >> 5) & 0x38) + ((sx >> 8) & 7);
+          u32 o1 = ((ty >> 5) & 0x38) + ((tx >> 8) & 7);
+          u32 t0 = *m0, t1 = *m1;
+          __asm__ ("" : "+r"(t0), "+r"(t1), "+r"(o0), "+r"(o1));
+          u32 p0 = tile_base[(t0 << 6) + o0], p1 = tile_base[(t1 << 6) + o1];
+          __asm__ ("" : "+r"(p0), "+r"(p1));
+          rend_pix_8bpp<dtype, rdtype, isbase>(dst_ptr, p0, bg_comb, px_comb, pal);
+          rend_pix_8bpp<dtype, rdtype, isbase>(dst_ptr + 1, p1, bg_comb, px_comb, pal);
+          dst_ptr += 2;
+          source_x += 2 * dx; source_y += 2 * dy;
+          cnt -= 2;
+        }
+        if (cnt) {
+          u32 sx = (u32)source_x & msk, sy = (u32)source_y & msk;
+          u32 t = map_base[(sx >> 11) + ((sy >> 11) << map_pitch)];
+          u8 p = tile_base[(t << 6) + ((sy >> 5) & 0x38) + ((sx >> 8) & 7)];
+          rend_pix_8bpp<dtype, rdtype, isbase>(dst_ptr, p, bg_comb, px_comb, pal);
+        }
+      } else {
+        const u32 sy = (u32)source_y & msk;
+        const u8 *mrow = &map_base[(sy >> 11) << map_pitch];
+        const u8 *trow = &tile_base[(sy >> 5) & 0x38];
+        while (cnt >= 2) {
+          u32 sx = (u32)source_x & msk, tx = (u32)(source_x + dx) & msk;
+          u32 t0 = mrow[sx >> 11], t1 = mrow[tx >> 11];
+          u32 o0 = (sx >> 8) & 7, o1 = (tx >> 8) & 7;
+          __asm__ ("" : "+r"(t0), "+r"(t1), "+r"(o0), "+r"(o1));
+          u32 p0 = trow[(t0 << 6) + o0], p1 = trow[(t1 << 6) + o1];
+          __asm__ ("" : "+r"(p0), "+r"(p1));
+          rend_pix_8bpp<dtype, rdtype, isbase>(dst_ptr, p0, bg_comb, px_comb, pal);
+          rend_pix_8bpp<dtype, rdtype, isbase>(dst_ptr + 1, p1, bg_comb, px_comb, pal);
+          dst_ptr += 2;
+          source_x += 2 * dx;
+          cnt -= 2;
+        }
+        if (cnt) {
+          u32 sx = (u32)source_x & msk;
+          u8 p = trow[(mrow[sx >> 11] << 6) + ((sx >> 8) & 7)];
+          rend_pix_8bpp<dtype, rdtype, isbase>(dst_ptr, p, bg_comb, px_comb, pal);
+        }
+      }
+    } else
+#endif
     if (rotate) {
       for (u32 i = 0; cnt; i++, cnt--) {
         u32 pix_x = (u32)(source_x >> 8) & (width_height-1);
@@ -794,6 +910,49 @@ static inline void render_affine_background(
     }
   } else {
     u16 bgcol = pal[0];
+#ifdef LL
+    if (rotate && !mosaic) {
+      // LL: (x >> 8) < wh && (y >> 8) < wh  <=>  (u32)(x | y) < wh << 8 (wh is a power
+      // of two; negative coordinates are huge unsigned). Same pixels as below.
+      const u32 lim = width_height << 8;
+      const u32 map_pitch = map_size + 4;
+      while (cnt && (u32)(source_x | source_y) >= lim) {
+        if (isbase)
+          render_bdrop_pixel_8bpp<dtype, rdtype>(dst_ptr, bg_comb, bgcol);
+        dst_ptr++;
+        source_x += dx; source_y += dy;
+        cnt--;
+      }
+      // two pixels at a time: both loads of each step issued before their use
+      while (cnt >= 2) {
+        u32 sx = (u32)source_x, sy = (u32)source_y;
+        u32 tx = sx + dx, ty = sy + dy;
+        if ((sx | sy | tx | ty) >= lim)
+          break;
+        const u8 *m0 = &map_base[(sx >> 11) + ((sy >> 11) << map_pitch)];
+        const u8 *m1 = &map_base[(tx >> 11) + ((ty >> 11) << map_pitch)];
+        u32 o0 = ((sy >> 5) & 0x38) + ((sx >> 8) & 7);
+        u32 o1 = ((ty >> 5) & 0x38) + ((tx >> 8) & 7);
+        u32 t0 = *m0, t1 = *m1;
+        __asm__ ("" : "+r"(t0), "+r"(t1), "+r"(o0), "+r"(o1));
+        u32 p0 = tile_base[(t0 << 6) + o0], p1 = tile_base[(t1 << 6) + o1];
+        __asm__ ("" : "+r"(p0), "+r"(p1));
+        rend_pix_8bpp<dtype, rdtype, isbase>(dst_ptr, p0, bg_comb, px_comb, pal);
+        rend_pix_8bpp<dtype, rdtype, isbase>(dst_ptr + 1, p1, bg_comb, px_comb, pal);
+        dst_ptr += 2;
+        source_x = tx + dx; source_y = ty + dy;
+        cnt -= 2;
+      }
+      while (cnt && (u32)(source_x | source_y) < lim) {
+        u32 sx = (u32)source_x, sy = (u32)source_y;
+        u32 tile = map_base[(sx >> 11) + ((sy >> 11) << map_pitch)];
+        u8 pval = tile_base[(tile << 6) + ((sy >> 5) & 0x38) + ((sx >> 8) & 7)];
+        rend_pix_8bpp<dtype, rdtype, isbase>(dst_ptr++, pval, bg_comb, px_comb, pal);
+        source_x += dx; source_y += dy;
+        cnt--;
+      }
+    } else
+#endif
     if (rotate) {
       // Draw backdrop pixels if necessary until we reach the background edge.
       while (cnt) {
@@ -1804,6 +1963,20 @@ static void order_layers(u32 layer_flags, u32 vcnt)
     (u32)(read_ioreg(REG_BGxCNT(3)) & 0x03),
   };
 
+#ifdef LL
+  // LL: the order only depends on these bits: kept while they stay the same
+  {
+    static u32 last_key = ~0U;
+    u32 key = (layer_flags & 0x1F) | (layer_prio[0] << 5) | (layer_prio[1] << 7) |
+              (layer_prio[2] << 9) | (layer_prio[3] << 11);
+    if (obj_enabled)
+      key |= ((obj_priority_count[0][vcnt] > 0) << 13) | ((obj_priority_count[1][vcnt] > 0) << 14) |
+             ((obj_priority_count[2][vcnt] > 0) << 15) | ((obj_priority_count[3][vcnt] > 0) << 16);
+    if (key == last_key)
+      return;
+    last_key = key;
+  }
+#endif
   layer_count = 0;
 
   for(priority = 3; priority >= 0; priority--)
@@ -2103,30 +2276,53 @@ void tile_render_layers(u32 start, u32 end, dsttype *dst_ptr, u32 enabled_layers
    indexed_u16 + merge_brightness. */
 extern "C" { u32 ll_pal_dirty[16] = { ~0U, ~0U, ~0U, ~0U, ~0U, ~0U, ~0U, ~0U,
                                       ~0U, ~0U, ~0U, ~0U, ~0U, ~0U, ~0U, ~0U }; }
-static u16 ll_pal_fx[512];
-static u32 ll_fx_key = ~0U;
+/* One effect palette per (dark, brightness) (34 slots, built when first used):
+   a game that changes BLDY per line (fades, fog) switches palettes instead of
+   recomputing one. Palette writes (ll_pal_dirty) are folded into the dirty bits
+   of every built slot. */
+#define LL_FX_SLOTS 34
+static u16 ll_pal_fx_slot[LL_FX_SLOTS][512];
+static u32 ll_fx_dirty[LL_FX_SLOTS][16];
+static u8 ll_fx_built[LL_FX_SLOTS], ll_fx_list[LL_FX_SLOTS];
+static u32 ll_fx_nbuilt;
+static u16 *ll_pal_fx = ll_pal_fx_slot[0];
 
 static void ll_update_fx_palette(bool dark, u32 brightness)
 {
-  u32 key = (dark ? 0x100 : 0) | brightness;
-  if (key != ll_fx_key) {
-    ll_fx_key = key;
+  u32 slot = (dark ? 17 : 0) + brightness;
+  u32 any = 0;
+  for (u32 w = 0; w < 16; w++)
+    any |= ll_pal_dirty[w];
+  if (any) {
+    for (u32 k = 0; k < ll_fx_nbuilt; k++) {
+      u32 *d = ll_fx_dirty[ll_fx_list[k]];
+      for (u32 w = 0; w < 16; w++)
+        d[w] |= ll_pal_dirty[w];
+    }
     for (u32 w = 0; w < 16; w++)
-      ll_pal_dirty[w] = ~0U;
+      ll_pal_dirty[w] = 0;
   }
+  u32 *dirty = ll_fx_dirty[slot];
+  if (!ll_fx_built[slot]) {
+    ll_fx_built[slot] = 1;
+    ll_fx_list[ll_fx_nbuilt++] = slot;
+    for (u32 w = 0; w < 16; w++)
+      dirty[w] = ~0U;
+  }
+  u16 *fx = ll_pal_fx = ll_pal_fx_slot[slot];
   u32 pa = dark ? 0 : ((BLND_MSK * brightness) >> 4) & BLND_MSK;
   for (u32 w = 0; w < 16; w++) {
-    u32 d = ll_pal_dirty[w];
+    u32 d = dirty[w];
     if (!d)
       continue;
-    ll_pal_dirty[w] = 0;
+    dirty[w] = 0;
     for (u32 i = w * 32; d; i++, d >>= 1) {
       if (d & 1) {
         u32 pixcol = palette_ram_converted[i];
         u32 epixel = (pixcol | (pixcol << 16)) & BLND_MSK;
         u32 pb = ((epixel * (16 - brightness)) >> 4) & BLND_MSK;
         epixel = (pa + pb) & BLND_MSK;
-        ll_pal_fx[i] = (u16)((epixel >> 16) | epixel);
+        fx[i] = (u16)((epixel >> 16) | epixel);
       }
     }
   }
@@ -2580,6 +2776,119 @@ static const u8 active_layers[] = {
   0,
 };
 
+#ifdef LL_VSKIP
+/* LL: a line whose inputs are those it had when it was last drawn is not drawn
+   again (its picture is still on the LCD). Inputs: the display I/O registers (all
+   but DISPSTAT/VCOUNT), the affine references, and generations of BG VRAM/BG
+   palette (+ OBJ VRAM in bitmap modes), and if the line has objects (now or then:
+   the count is an input) OBJ VRAM/OBJ palette/OAM. A generation advances when a
+   write changes that memory (ll_vchg[] set by the writes: gba_memory.c and
+   arc_stub.S compare before they store). The inputs are kept as two different
+   32-bit hashes per line. */
+extern "C" {
+  u32 ll_vchg[8];         // 0 BG VRAM, 1 OBJ VRAM, 2 BG palette, 3 OBJ palette, 4 OAM
+  u32 ll_vskip_force;     // set: every line is drawn (frontend: screenshots)
+  void ll_scanline_same(u32 vcount);
+  void ll_vskip_invalidate(u32 from, u32 to);
+#ifdef LL_VSKIPCHK
+  u32 ll_vskip_would;
+#endif
+}
+static u32 ll_vgen[5];
+extern "C" { u32 ll_io_dirty = 1; }
+#ifdef LL_VSTAT
+static u32 ll_why_io[21], ll_why_n[32];
+extern "C" void ll_why_print(void) { printf("WHY"); for (u32 i = 0; i < 32; i++) printf(" %u:%u", i, ll_why_n[i]); printf("\n"); }
+#endif
+#ifdef LL_VSTAT
+extern "C" void ll_vstat_print(void);
+void ll_vstat_print(void) { printf("VGEN bgvram %u objvram %u bgpal %u objpal %u oam %u\n", ll_vgen[0], ll_vgen[1], ll_vgen[2], ll_vgen[3], ll_vgen[4]); }
+#endif
+static u32 ll_line_key[160][2];
+static u8 ll_line_valid[160];
+
+void ll_vskip_invalidate(u32 from, u32 to)
+{
+  ll_io_dirty = 1;
+  for (u32 i = from; i < to && i < 160; i++)
+    ll_line_valid[i] = 0;
+}
+
+static inline bool ll_line_unchanged(u32 vcount, u32 video_mode)
+{
+  for (u32 i = 0; i < 5; i++)
+    if (ll_vchg[i]) {
+      ll_vchg[i] = 0;
+      ll_vgen[i]++;
+    }
+  u32 objs = obj_priority_count[0][vcount] + obj_priority_count[1][vcount] +
+             obj_priority_count[2][vcount] + obj_priority_count[3][vcount] +
+             obj_priority_count[4][vcount];
+  // the display registers are hashed again only after a write to them
+  static u32 io_h1, io_h2, m2, m3;
+  if (ll_io_dirty) {
+    ll_io_dirty = 0;
+    const u32 *io = (const u32 *)io_registers;
+    u32 k[21];
+    k[0] = io[0];
+    for (u32 i = 2; i < 22; i++)    // 0x08..0x57 (not DISPSTAT, VCOUNT)
+      k[i - 1] = io[i];
+    // the registers of disabled layers (and of the windows when none is on) are not inputs
+    u32 en = io[0] >> 8;
+    m2 = (en & 4) ? ~0U : 0; m3 = (en & 8) ? ~0U : 0;
+    k[1] &= ((en & 1) ? 0xFFFF : 0) | ((en & 2) ? 0xFFFF0000 : 0);
+    k[2] &= (m2 & 0xFFFF) | (m3 & 0xFFFF0000);
+    k[3] &= (en & 1) ? ~0U : 0;
+    k[4] &= (en & 2) ? ~0U : 0;
+    k[5] &= m2;
+    k[6] &= m3;
+    for (u32 i = 7; i < 11; i++) k[i] &= m2;    // BG2 affine
+    for (u32 i = 11; i < 15; i++) k[i] &= m3;   // BG3 affine
+    if (!(io[0] & 0xE000))
+      k[15] = k[16] = k[17] = 0;                // windows
+    u32 a = 0x811C9DC5, b = 0x6A09E667;
+    for (u32 i = 0; i < 21; i++) {
+      a = (a ^ k[i]) * 0x01000193;
+      b = ((b << 5) | (b >> 27)) + (k[i] ^ (b >> 11)) + i;
+    }
+    io_h1 = a; io_h2 = b;
+#ifdef LL_VSTAT
+    for (u32 i = 0; i < 21; i++) ll_why_io[i] = k[i];
+#endif
+  }
+  u32 k[10];
+  k[0] = affine_reference_x[0] & m2; k[1] = affine_reference_y[0] & m2;
+  k[2] = affine_reference_x[1] & m3; k[3] = affine_reference_y[1] & m3;
+  k[4] = ll_vgen[0] + (ll_vgen[2] << 16);
+  k[5] = (video_mode >= 3) || objs ? ll_vgen[1] : 0;
+  k[6] = objs ? ll_vgen[3] : 0;
+  k[7] = objs ? ll_vgen[4] : 0;
+  k[8] = objs;
+  k[9] = video_mode;
+  u32 h1 = io_h1, h2 = io_h2;
+  for (u32 i = 0; i < 10; i++) {
+    h1 = (h1 ^ k[i]) * 0x01000193;
+    h2 = ((h2 << 5) | (h2 >> 27)) + (k[i] ^ (h2 >> 11)) + i;
+  }
+#ifdef LL_VSTAT
+  if (vcount < 160) {
+    static u32 prev_io[160][21], prev_k[160][10];
+    bool diff = false;
+    for (u32 i = 0; i < 21; i++) if (prev_io[vcount][i] != ll_why_io[i]) ll_why_n[i]++, diff = true, prev_io[vcount][i] = ll_why_io[i];
+    for (u32 i = 0; i < 10; i++) if (prev_k[vcount][i] != k[i]) ll_why_n[21 + i]++, diff = true, prev_k[vcount][i] = k[i];
+    { static u32 pv[160], pp[160]; ll_why_n[30] += pv[vcount] != (ll_vgen[0] & 0xFFFF); pv[vcount] = ll_vgen[0] & 0xFFFF; ll_why_n[13] += pp[vcount] != ll_vgen[2]; pp[vcount] = ll_vgen[2]; }
+    ll_why_n[31] += diff;
+  }
+#endif
+  bool same = ll_line_valid[vcount] && ll_line_key[vcount][0] == h1 &&
+              ll_line_key[vcount][1] == h2 && !ll_vskip_force;
+  ll_line_key[vcount][0] = h1;
+  ll_line_key[vcount][1] = h2;
+  ll_line_valid[vcount] = 1;
+  return same;
+}
+#endif
+
 void update_scanline(void)
 {
   u32 pitch = get_screen_pitch();
@@ -2612,6 +2921,18 @@ void update_scanline(void)
   if (((vcount ^ ll_interlace_field) & 1) == 0)
 #endif
   {
+#ifdef LL_VSKIP
+  bool ll_same = vcount < 160 && ll_line_unchanged(vcount, video_mode);
+#ifdef LL_VSKIPCHK
+  ll_vskip_would = ll_same;  // (drawn anyway: the frontend checks the picture is the same)
+  if (0)
+#else
+  if (ll_same)
+#endif
+    ll_scanline_same(vcount);
+  else
+#endif
+  {
   // If the screen is in in forced blank draw pure white.
   if(dispcnt & 0x80)
     memset(screen_offset, 0xff, 240*sizeof(u16));
@@ -2620,6 +2941,7 @@ void update_scanline(void)
 #ifdef LL
   ll_scanline_out(vcount, screen_offset);
 #endif
+  }
   }
 
   // Mode 0 does not use any affine params at all.

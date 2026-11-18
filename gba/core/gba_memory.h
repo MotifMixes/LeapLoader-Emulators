@@ -350,6 +350,13 @@ extern u32 ll_pal_dirty[16];
 #else
 #define LL_PAL_DIRTY(byteaddr)
 #endif
+#ifdef LL_VSKIP
+/* LL: set when a write changes video memory (video.cc: lines drawn again) */
+extern u32 ll_vchg[8], ll_io_dirty;
+#define LL_VCHG_IF(cond, i) do { if (cond) ll_vchg[i] = 1; } while (0)
+#else
+#define LL_VCHG_IF(cond, i) do { } while (0)
+#endif
 extern u16 io_registers[512];
 extern u8 vram[1024 * 96];
 extern u8 bios_rom[1024 * 16];

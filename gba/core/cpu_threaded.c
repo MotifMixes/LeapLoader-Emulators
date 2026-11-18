@@ -212,6 +212,90 @@ typedef struct
 #define thumb_decode_branch()                                                 \
   u32 offset = opcode & 0x07FF                                                \
 
+#if defined(ARC_ARCH)
+/* LL pc map: the return address of each memory stub call -> the GBA pc the call
+   used to carry as a data word after it (the stubs need it only on slow paths:
+   ll_pc(), store alerts). Open addressing (key 0 = empty) without wrap-around:
+   a probe that runs past the tail marks the table full and its cache is flushed
+   at the next instruction, as when the cache itself is full. */
+#define LL_PCMAP_ROM (1 << 16)
+#define LL_PCMAP_RAM (1 << 14)
+#define LL_PCMAP_TAIL 1024
+static u32 ll_pcmap_rom[2 * (LL_PCMAP_ROM + LL_PCMAP_TAIL)];
+static u32 ll_pcmap_ram[2 * (LL_PCMAP_RAM + LL_PCMAP_TAIL)];
+static u32 ll_pcmap_full_rom, ll_pcmap_full_ram;
+
+static inline u32 *ll_pcmap_home(u32 ret, u32 **end, u32 **full)
+{
+  if (ret >= (u32)ram_translation_cache) {
+    *end = &ll_pcmap_ram[2 * (LL_PCMAP_RAM + LL_PCMAP_TAIL)];
+    *full = &ll_pcmap_full_ram;
+    return &ll_pcmap_ram[2 * ((ret >> 1) & (LL_PCMAP_RAM - 1))];
+  }
+  *end = &ll_pcmap_rom[2 * (LL_PCMAP_ROM + LL_PCMAP_TAIL)];
+  *full = &ll_pcmap_full_rom;
+  return &ll_pcmap_rom[2 * ((ret >> 1) & (LL_PCMAP_ROM - 1))];
+}
+
+static void ll_pcmap_add(const u8 *retp, u32 pc)
+{
+  u32 ret = (u32)retp, *end, *full;
+  u32 *e = ll_pcmap_home(ret, &end, &full);
+  while (e[0] && e[0] != ret) {
+    e += 2;
+    if (e >= end) {
+      *full = 1;
+      return;
+    }
+  }
+  e[0] = ret;
+  e[1] = pc;
+}
+
+u32 ll_pcmap_find(u32 ret)
+{
+  u32 *end, *full;
+  u32 *e = ll_pcmap_home(ret, &end, &full);
+  while (e < end && e[0] != ret && e[0])
+    e += 2;
+  return (e < end && e[0] == ret) ? e[1] : reg[REG_PC];
+}
+
+/* The pc of the memory access in progress, for C code on a stub's slow path */
+u32 ll_pc(void)
+{
+  u32 ret = reg[REG_SAVE5];
+  if (ret) {
+    reg[REG_PC] = ll_pcmap_find(ret);
+    reg[REG_SAVE5] = 0;
+  }
+  return reg[REG_PC];
+}
+
+static void ll_pcmap_clear_ram(void)
+{
+  memset(ll_pcmap_ram, 0, sizeof(ll_pcmap_ram));
+  ll_pcmap_full_ram = 0;
+}
+
+/* entries below the watermark (code kept by a ROM flush) are put back */
+static void ll_pcmap_clear_rom(const u8 *keep_below)
+{
+  static u32 keep[2 * 256];
+  u32 i, n = 0;
+  for (i = 0; i < 2 * (LL_PCMAP_ROM + LL_PCMAP_TAIL) && n < 256; i += 2)
+    if (ll_pcmap_rom[i] && ll_pcmap_rom[i] < (u32)keep_below)
+      keep[2 * n] = ll_pcmap_rom[i], keep[2 * n + 1] = ll_pcmap_rom[i + 1], n++;
+  memset(ll_pcmap_rom, 0, sizeof(ll_pcmap_rom));
+  ll_pcmap_full_rom = 0;
+  for (i = 0; i < n; i++)
+    ll_pcmap_add((const u8 *)keep[2 * i], keep[2 * i + 1]);
+}
+#define ll_pcmap_full(ram_region) ((ram_region) ? ll_pcmap_full_ram : ll_pcmap_full_rom)
+#else
+#define ll_pcmap_full(ram_region) 0
+#endif
+
 /* Include the right emitter headers */
 #if defined(ARC_ARCH)
   #include "arc/arc_emit.h"
@@ -3398,7 +3482,7 @@ bool translate_block_arm(u32 pc, bool ram_region)
        a simple recursive call here won't work, it has to pedal out to
        the beginning. */
 
-    if(translation_ptr > translation_cache_limit) {
+    if(translation_ptr > translation_cache_limit || ll_pcmap_full(ram_region)) {
       if (ram_region)
         flush_translation_cache_ram();
       else
@@ -3561,7 +3645,7 @@ bool translate_block_thumb(u32 pc, bool ram_region)
        a simple recursive call here won't work, it has to pedal out to
        the beginning. */
 
-    if(translation_ptr > translation_cache_limit)
+    if(translation_ptr > translation_cache_limit || ll_pcmap_full(ram_region))
     {
       if (ram_region)
         flush_translation_cache_ram();
@@ -3653,6 +3737,9 @@ void flush_translation_cache_ram(void)
 
   last_ram_translation_ptr = ram_translation_cache;
   ram_translation_ptr = ram_translation_cache;
+#ifdef ARC_ARCH
+  ll_pcmap_clear_ram();
+#endif
 
   // Proceed to clean the SMC area if needed
   // (also try to memset as little as possible for performance)
@@ -3687,6 +3774,9 @@ void flush_translation_cache_rom(void)
   /* We flush the generated code except for everything below the watermark. */
   last_rom_translation_ptr = &rom_translation_cache[rom_cache_watermark];
   rom_translation_ptr      = &rom_translation_cache[rom_cache_watermark];
+#ifdef ARC_ARCH
+  ll_pcmap_clear_rom(rom_translation_ptr);
+#endif
 
   memset(rom_branch_hash, 0, sizeof(rom_branch_hash));
 }
@@ -3700,6 +3790,10 @@ void init_dynarec_caches(void)
 
   ram_translation_ptr = last_ram_translation_ptr = &ram_translation_cache[0];
   memset(iwram, 0, 0x8000);
+#ifdef ARC_ARCH
+  ll_pcmap_clear_ram();
+  ll_pcmap_clear_rom(rom_translation_cache);
+#endif
   memset(&ewram[0x40000], 0, 0x40000);
 
   ewram_code_min = 0;

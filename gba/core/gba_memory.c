@@ -643,9 +643,9 @@ void function_cc write_eeprom(u32 unused_address, u32 value)
   {                                                                           \
     u32 fetch_addr;                                                           \
     if(!(reg[REG_CPSR] & 0x20))                                               \
-      fetch_addr = reg[REG_PC] + 8 + (address & 0x03);                        \
+      fetch_addr = LL_PC() + 8 + (address & 0x03);                        \
     else                                                                      \
-      fetch_addr = reg[REG_PC] + 4 + (address & 0x01);                        \
+      fetch_addr = LL_PC() + 4 + (address & 0x01);                        \
     if(fetch_is_open_bus(fetch_addr))                                         \
       value = (u8)(reg[REG_BUS_VALUE] >> ((address & 0x03) << 3));            \
     else                                                                      \
@@ -656,9 +656,9 @@ void function_cc write_eeprom(u32 unused_address, u32 value)
   {                                                                           \
     u32 fetch_addr;                                                           \
     if(!(reg[REG_CPSR] & 0x20))                                               \
-      fetch_addr = reg[REG_PC] + 8 + (address & 0x02);                        \
+      fetch_addr = LL_PC() + 8 + (address & 0x02);                        \
     else                                                                      \
-      fetch_addr = reg[REG_PC] + 4;                                           \
+      fetch_addr = LL_PC() + 4;                                           \
     if(fetch_is_open_bus(fetch_addr))                                         \
       value = (u16)(reg[REG_BUS_VALUE] >> ((address & 0x02) << 3));           \
     else                                                                      \
@@ -668,7 +668,7 @@ void function_cc write_eeprom(u32 unused_address, u32 value)
 #define read_open32()                                                         \
   if(!(reg[REG_CPSR] & 0x20))                                                 \
   {                                                                           \
-    u32 fetch_addr = reg[REG_PC] + 8;                                         \
+    u32 fetch_addr = LL_PC() + 8;                                         \
     if(fetch_is_open_bus(fetch_addr))                                         \
       value = reg[REG_BUS_VALUE];                                             \
     else                                                                      \
@@ -676,7 +676,7 @@ void function_cc write_eeprom(u32 unused_address, u32 value)
   }                                                                           \
   else                                                                        \
   {                                                                           \
-    u32 fetch_addr = reg[REG_PC] + 4;                                         \
+    u32 fetch_addr = LL_PC() + 4;                                         \
     u32 current_instruction;                                                  \
     if(fetch_is_open_bus(fetch_addr))                                         \
       current_instruction = (u16)reg[REG_BUS_VALUE];                          \
@@ -907,7 +907,7 @@ u32 function_cc read_eeprom(void)
     case 0x00:                                                                \
       /* BIOS */                                                              \
       if (address < 0x4000) {                                                 \
-        if(reg[REG_PC] >= 0x4000)                                             \
+        if(LL_PC() >= 0x4000)                                             \
           value = (u##type)(reg[REG_BUS_VALUE] >> ((address & 0x03) << 3));   \
         else                                                                  \
           value = readaddress##type(bios_rom, address & 0x3FFF);              \
@@ -1069,6 +1069,10 @@ cpu_alert_type function_cc write_io_register16(u32 address, u32 value)
 {
   uint32_t ioreg = ((address & 0xffffff) >> 1);
   value &= 0xffff;
+#ifdef LL_VSKIP
+  if (ioreg < 0x2C)   /* display registers: video.cc hashes them again */
+    ll_io_dirty = 1;
+#endif
   switch(ioreg)
   {
     case REG_DISPCNT:
@@ -1308,6 +1312,8 @@ cpu_alert_type function_cc write_io_register32(u32 address, u32 value)
 {                                                                             \
   u32 aladdr = address & ~1U;                                                 \
   u16 val16 = (value << 8) | value;                                           \
+  LL_VCHG_IF(address16(palette_ram, aladdr) != eswap16(val16),                \
+             2 + ((aladdr >> 9) & 1));                                        \
   address16(palette_ram, aladdr) = eswap16(val16);                            \
   address16(palette_ram_converted, aladdr) = convert_palette(val16);          \
   LL_PAL_DIRTY(aladdr);                                                       \
@@ -1316,6 +1322,8 @@ cpu_alert_type function_cc write_io_register32(u32 address, u32 value)
 #define write_palette16(address, value)                                       \
 {                                                                             \
   u32 palette_address = address;                                              \
+  LL_VCHG_IF(address16(palette_ram, palette_address) != eswap16((u16)value),  \
+             2 + ((palette_address >> 9) & 1));                               \
   address16(palette_ram, palette_address) = eswap16(value);                   \
   value = convert_palette(value);                                             \
   address16(palette_ram_converted, palette_address) = value;                  \
@@ -1327,6 +1335,8 @@ cpu_alert_type function_cc write_io_register32(u32 address, u32 value)
   u32 palette_address = address;                                              \
   u32 value_high = value >> 16;                                               \
   u32 value_low = value & 0xFFFF;                                             \
+  LL_VCHG_IF(address32(palette_ram, palette_address) != eswap32(value),       \
+             2 + ((palette_address >> 9) & 1));                               \
   address32(palette_ram, palette_address) = eswap32(value);                   \
   value_high = convert_palette(value_high);                                   \
   address16(palette_ram_converted, palette_address + 2) = value_high;         \
@@ -1472,12 +1482,17 @@ void function_cc write_backup(u32 address, u32 value)
 
 #define write_vram8()                                                         \
   address &= ~0x01;                                                           \
+  LL_VCHG_IF(address16(vram, address) != eswap16((u16)((value << 8) | value)),\
+             address >= 0x10000);                                             \
   address16(vram, address) = eswap16((value << 8) | value)                    \
 
 #define write_vram16()                                                        \
+  LL_VCHG_IF(address16(vram, address) != eswap16((u16)value),                 \
+             address >= 0x10000);                                             \
   address16(vram, address) = eswap16(value)                                   \
 
 #define write_vram32()                                                        \
+  LL_VCHG_IF(address32(vram, address) != eswap32(value), address >= 0x10000); \
   address32(vram, address) = eswap32(value)                                   \
 
 // RTC code derived from VBA's (due to lack of any real publically available
@@ -1799,6 +1814,8 @@ void function_cc write_gpio(u32 address, u32 value) {
       /* OAM RAM */                                                           \
       if (type != 8) {                                                        \
         reg[OAM_UPDATED] = 1;                                                 \
+        LL_VCHG_IF(address##type(oam_ram, address & 0x3FF) !=                 \
+                   (u##type)eswap##type(value), 4);                           \
         address##type(oam_ram, address & 0x3FF) = eswap##type(value);         \
       }                                                                       \
       break;                                                                  \
@@ -2120,6 +2137,8 @@ const dma_region_type dma_region_map[17] =
 #define dma_write_vram(type, tfsize) {                                        \
   u32 wraddr = type##_ptr & 0x1FFFF;                                          \
   if (wraddr >= 0x18000) wraddr -= 0x8000;                                    \
+  LL_VCHG_IF(address##tfsize(vram, wraddr) !=                                 \
+             (u##tfsize)eswap##tfsize(read_value), wraddr >= 0x10000);        \
   address##tfsize(vram, wraddr) = eswap##tfsize(read_value);                  \
 }
 
@@ -2127,6 +2146,8 @@ const dma_region_type dma_region_map[17] =
   alerts |= write_io_register##tfsize(type##_ptr, read_value)                 \
 
 #define dma_write_oam_ram(type, tfsize)                                       \
+  LL_VCHG_IF(address##tfsize(oam_ram, type##_ptr & 0x3FF) !=                  \
+             (u##tfsize)eswap##tfsize(read_value), 4);                        \
   address##tfsize(oam_ram, type##_ptr & 0x3FF) = eswap##tfsize(read_value)    \
 
 #define dma_write_palette_ram(type, tfsize)                                   \

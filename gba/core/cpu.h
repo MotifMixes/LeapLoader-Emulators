@@ -156,6 +156,12 @@ extern int sceBlock;
 extern u8 rom_translation_cache[ROM_TRANSLATION_CACHE_SIZE];
 extern u8 ram_translation_cache[RAM_TRANSLATION_CACHE_SIZE];
 #endif
+#ifdef ARC_ARCH
+u32 ll_pc(void);   /* the pc of the memory access in progress (cpu_threaded.c) */
+#define LL_PC() ll_pc()
+#else
+#define LL_PC() reg[REG_PC]
+#endif
 extern u8 *rom_translation_ptr;
 extern u8 *ram_translation_ptr;
 

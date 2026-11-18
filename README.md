@@ -18,9 +18,11 @@ Use at your own risk.
 No games come with them: bring your own `.nes`, `.gb` and `.gbc` files.
 
 **GBA is experimental.** It runs in Ribbit, with sound, saves and the menus, but has not been tested
-on a real Leapster 2 yet. Most games are too heavy to draw every frame at the console's 96 MHz
-(Sonic Advance ~75% of a frame, Metroid Fusion ~110%, Super Mario Advance 2/4 ~130%, Advance Wars
-and Mario Kart ~185%, every frame drawn), so it skips drawing frames to keep the game at its real speed.
+on a real Leapster 2 yet. Games are too heavy to draw every frame at the console's 96 MHz: measured
+in gameplay on a model of the console's CPU and caches, every frame drawn, a frame takes from ~140%
+of a frame's time (Wario Land 4) to ~320% (F-Zero, Mario Kart); Super Mario Advance 2 ~190%,
+Metroid Fusion ~200%, Advance Wars ~215%, Sonic Advance ~235%. So it skips drawing frames to keep
+the game at its real speed.
 
 **Experimental: Super Nintendo.** A preview build (a heavily modified Snes9x 1.39) is on the
 [Releases](https://github.com/MotifMixes/LeapLoader-Emulators/releases) page with its sources. It is
@@ -80,8 +82,9 @@ Choose **NES**, **Game Boy** or **GBA** in LeapLoader's menu on the console.
   the game runs at its real speed.
 * **GBA:** gpSP translates the game's ARM and Thumb code into ARC code as it runs (`gba/core/arc`). It
   keeps as much of the game in memory as fits (1 MB blocks) and reads the rest from the card in 32 KB
-  pages. It uses the open-source GBA BIOS replacement that comes with gpSP (`gba/core/bios`), not
-  Nintendo's.
+  pages. A line whose inputs (registers, palettes, video memory it reads) haven't changed since it
+  was drawn is not drawn again. It uses the open-source GBA BIOS replacement that comes with gpSP
+  (`gba/core/bios`), not Nintendo's.
 * **Code:** each app is native ARC code (`code.bin`, linked at 0x3C81_0000), packaged with LeapLoader's
   homebrew format (`app.txt`, `code=`; see LeapLoader's `docs/homebrew.md`). LeapLoader wraps it into a
   Leapster 2 SD image when it builds the card. The BIOS owns the `gp` register, so everything is built

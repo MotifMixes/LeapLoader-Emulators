@@ -79,7 +79,7 @@ u32 gbp_transfer(u32 value) {
   u32 ret = gbp_seq[gbp_seq_n++];
 
   if (!gbp_allow_rumble &&
-      reg[REG_PC] >= 0x08000000 && reg[REG_PC] < 0x0E000000)
+      LL_PC() >= 0x08000000 && LL_PC() < 0x0E000000)
     gbp_allow_rumble = true;
 
   if (gbp_seq_n == 16) {
