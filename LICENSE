@@ -5,9 +5,14 @@ LeapLoader-Emulators: licences by part
   gb/core/    gnuboy: GNU GPL 2 (gb/core/COPYING)
   gba/core/   gpSP: GNU GPL 2 (gba/core/COPYING), including the ARC dynarec (gba/core/arc);
               gba/core/bios: the open GBA BIOS (Normmatt, the VBA/VBA-M team), GNU GPL 2
+  snes/       Snes9x 1.39 (snes9x2002) and everything made for it there (the SNES app, the
+              generators in snes/kern, the Super FX translator): the Snes9x licence,
+              snes/LICENSE.txt: NON-COMMERCIAL use only, not the GPL. The libretro-common
+              files in snes/s9x/libretro/libretro-common: their own licence (their headers)
   the rest    (nes/console, gb/console, gba/console, common, build.sh, cc.sh): the zlib licence below
 
-The built apps are distributed under their core's licence (GNU GPL 2).
+The built apps are distributed under their core's licence: GNU GPL 2 (NES, Game Boy, GBA), the
+Snes9x licence (SNES: non-commercial).
 
 ----------------------------------------------------------------------------------------------
 Copyright (c) 2026 MotifMixes
