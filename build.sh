@@ -1,5 +1,5 @@
 #!/bin/sh
-# build.sh: builds the NES and Game Boy apps into package/NES and package/GB,
+# build.sh: builds the NES, Game Boy and GBA apps into package/NES, package/GB and package/GBA,
 # homebrew packages for LeapLoader (app.txt + code.bin + card/ folders).
 #
 # Needs ARC GCC (the GNU toolchain for ARC, arc-elf32, -mcpu=arc600) and a
@@ -62,6 +62,23 @@ done
 console gb "$o" console.c $GF
 link gb gb "$o/entry.o" "$o/console.o" "$o/stubs.o" "$o/libc.o" "$o"/core_*.o
 
+# ---- Game Boy Advance: gpSP (libretro's gpsp, GPL-2) with an ARC600 dynarec (gba/core/arc), #ifdef LL
+o=$R/build/gba; rm -rf "$o"; mkdir -p "$o"
+AF="-DNDEBUG -DHAVE_DYNAREC -DARC_ARCH -DLL_ROM_CACHE_KB=1024 -DSOUND_BUFFER_BITS=12 -DLL_MIX_SHIFT=1 -DLL_FOLD_HBLANK
+    -DARC_DC_FLUSH_ALL -ffunction-sections -I$R/gba/core -I$R/gba/core/libretro/libretro-common/include
+    -I$R/gba/core/libretro -include retro_inline.h"
+for f in main gba_memory savestate input sound cheats memmap serial gbp rfu serial_proto gba_cc_lut cpu_threaded; do
+  "$CC" "$R/gba/core/$f.c" "$o/core_$f.o" $CF $AF &
+done
+for f in video cpu; do
+  "$CC" "$R/gba/core/$f.cc" "$o/core_$f.o" $CF $AF -fno-exceptions -fno-rtti &
+done
+wait
+"${ARC}gcc" -mcpu=arc600 -mmul64 $CF $AF -c "$R/gba/core/arc/arc_stub.S" -o "$o/core_arc_stub.o"
+"${ARC}gcc" -mcpu=arc600 -I"$R/gba/core" -c "$R/gba/core/bios_data.S" -o "$o/core_bios.o"  # the open GBA BIOS (gba/core/bios)
+console gba "$o" console.c $AF
+link gba gba "$o/entry.o" "$o/console.o" "$o/stubs.o" "$o/libc.o" "$o"/core_*.o
+
 # ---- the packages
 VERSION=$(cat "$R/VERSION")
 p=$R/package/NES; rm -rf "$p"; mkdir -p "$p/card/NES"
@@ -77,4 +94,16 @@ printf 'name=Game Boy\nid=GB\ncode=code.bin\nauthor=LeapLoader-Emulators (gnuboy
 printf 'Put Game Boy games (.gb) here.\n' > "$p/card/GB/Put GB games here.txt"
 printf 'Put Game Boy Color games (.gbc) here.\n' > "$p/card/GBC/Put GBC games here.txt"
 
-ls -l "$R/package/NES/code.bin" "$R/package/GB/code.bin" | awk '{print $NF, $5}'
+p=$R/package/GBA; rm -rf "$p"; mkdir -p "$p/card/GBA"
+cp "$R/build/gba.bin" "$p/code.bin"
+cp "$R/gba/core/COPYING" "$p/LICENSE.txt"
+printf 'name=GBA
+id=GBA
+code=code.bin
+author=LeapLoader-Emulators (gpSP, GPL-2) - experimental
+version=%s
+' "$VERSION" > "$p/app.txt"
+printf 'Put Game Boy Advance games (.gba) here.
+' > "$p/card/GBA/Put GBA games here.txt"
+
+ls -l "$R/package/NES/code.bin" "$R/package/GB/code.bin" "$R/package/GBA/code.bin" | awk '{print $NF, $5}'

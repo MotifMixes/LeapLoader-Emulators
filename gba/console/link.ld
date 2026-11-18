@@ -1,0 +1,18 @@
+/* The GBA app's native code: in game.bin at CODE_OFFSET, so at
+   0x3C80_0000 + CODE_OFFSET once the BIOS has loaded the image.
+   .bss and the heap follow the file's end; the stack is the top 64 KiB of
+   the load area (RAM ends at 0x3D00_0000). */
+ENTRY(_start)
+SECTIONS
+{
+    . = 0x3C810000;
+    .text : { *(.text.start) *(.text.ll_scanline_out) *(.text._Z25render_scanline_text_fastItL8rendtype0ELb1ELb0EEvjjjPvPKtt) *(.text.update_gba) *(.text._Z25render_scanline_text_fastItL8rendtype0ELb0ELb0EEvjjjPvPKtt) *(.text._ZL16render_w_effectsjjPtjPK19layer_render_struct) *(.text.sound_timer) *(.text.update_scanline) *(.text._Z13render_objectItL8rendtype0ELb0ELb0EEvijPT_jjtPKt.isra.0) *arc_stub.o(.text) *(.text.sound_read_samples) *(.text._Z25render_scanline_text_fastIjL8rendtype1ELb1ELb0EEvjjjPvPKtt.isra.0) *(.text._Z25render_scanline_text_fastIjL8rendtype2ELb0ELb0EEvjjjPvPKtt.isra.0) *(.text._Z25render_scanline_text_fastItL8rendtype0ELb0ELb1EEvjjjPvPKtt) *(.text._Z24render_affine_backgroundIjL8rendtype1ELb0ELb0ELb1ELb0EEvjjjPKhjS2_PvPKt) *(.text._Z25render_scanline_text_fastItL8rendtype0ELb1ELb1EEvjjjPvPKtt) *(.text.render_gbc_sound) *(.text._Z20render_scanline_objsIjL8rendtype1EEvjjjPvPKt.isra.0) *(.text.dma_tf_loop16) *(.text._ZL27render_scanline_conditionaljjPtj) *(.text._Z24render_affine_backgroundItL8rendtype1ELb1ELb0ELb0ELb1EEvjjjPKhjS2_PvPKt) *(.text._Z22render_scanline_bitmapIL8rendtype0EtLj4EhLj240ELj160EL11bm_rendmode0ELb0EEvjjPvPKt) *(.text.write_io_register16) *(.text._Z13render_objectIjL8rendtype1ELb0ELb0EEvijPT_jjtPKt.isra.0) *(.text._ZL9order_objj) *(.text.dma_tf_loop32) *(.text._Z20render_scanline_textItL8rendtype0ELb0EEvjjjPvPKt) *(.text._ZL17ll_tile_render_fxjjPtj) *(.text._Z25render_scanline_text_fastIjL8rendtype1ELb0ELb0EEvjjjPvPKtt.isra.0) *(.text._Z20render_window_n_passIXadL_ZL21render_windowobj_passPtjjEELj1EEvS0_jj.constprop.0) *(.text.check_and_raise_interrupts) *(.text.read_io_register16) *(.text.update_serial) *(.text._Z25render_scanline_text_fastIjL8rendtype1ELb0ELb1EEvjjjPvPKtt.isra.0) *(.text.dma_transfer) *(.text._Z20render_scanline_textItL8rendtype0ELb1EEvjjjPvPKt) *(.text._Z22render_scanline_bitmapIL8rendtype1EtLj4EhLj240ELj160EL11bm_rendmode1ELb0EEvjjPvPKt) *(.text._Z20bitmap_render_layersIL8rendtype0ELS0_0EtEvjjPT1_j) *(.text._Z25render_scanline_text_fastIjL8rendtype2ELb1ELb0EEvjjjPvPKtt.isra.0) *(.text.write_memory16) *(.text._ZL20ll_update_fx_palettebj) *(.text.flag_interrupt) *(.text._Z13render_objectIjL8rendtype2ELb0ELb0EEvijPT_jjtPKt.isra.0) *(.text._vfprintf_r) *(.text.write_backup) *(.text.set_cpu_mode) *(.text.trigger_timer) *(.text._Z22render_scanline_bitmapIL8rendtype0EtLj4EhLj240ELj160EL11bm_rendmode1ELb0EEvjjPvPKt) *(.text._Z20bitmap_render_layersIL8rendtype1ELS0_2EjEvjjPT1_j) *(.text.write_memory8) *(.text._Z13render_objectItL8rendtype0ELb0ELb1EEvijPT_jjtPKt.isra.0) *(.text._Z24render_affine_backgroundItL8rendtype0ELb0ELb0ELb1ELb0EEvjjjPKhjS2_PvPKt) *(.text.check_interrupt) *(.text.read_memory16) *(.text._Z20bitmap_render_layersIL8rendtype1ELS0_1EtEvjjPT1_j) *(.text.read_memory8) *(.text.trigger_dma) *(.text.block_lookup_translate_thumb) *(.text._Z20render_scanline_objsIjL8rendtype2EEvjjjPvPKt.isra.0) *(.text.__udivmodsi4) *(.text .text.*) }
+    .rodata : { *(.rodata .rodata.*) . = ALIGN(4); __init_array_start = .; KEEP(*(SORT(.init_array.*))) KEEP(*(.init_array .ctors)) __init_array_end = .; }
+    .data : { *(.data .data.*) *(.sdata .sdata.*) . = ALIGN(16); }
+    __file_end = .;
+    .bss (NOLOAD) : { __bss_start = .; *(.sbss .sbss.*) *(.bss .bss.* COMMON) . = ALIGN(16); __bss_end = .; }
+    end = .;
+    __heap_end = 0x3CFF0000;
+    __stack_top = 0x3CFFFF00;
+    /DISCARD/ : { *(.comment) *(.note*) }
+}
