@@ -1,0 +1,56 @@
+Genesis app (genesis/): licence
+
+PicoDrive 2.04 (genesis/picodrive: the parts this build uses, unchanged) and everything made for it
+here (genesis/port: the 68000 and Z80 cores in assembly and their generators, the line renderer, the
+YM2612/PSG loops; genesis/console: the Leapster 2 app) are under PicoDrive's licence, the MAME
+licence below: NON-COMMERCIAL use only. The built app (package/GENESIS) is distributed under it too.
+As it asks, this repository includes the complete source of the modified build: build.sh generates
+the remaining parts with the Python generators in genesis/port.
+
+Components PicoDrive includes, under their own terms (see their file headers):
+  * FAME 68000 emulation library, (c) 2005-2006 Oscar Orallo Pelaez, based on C68K by Stephane
+    Dallongeville (cpu/fame; cpu/fame/fame.html: may be distributed freely, nothing may be charged
+    for it, contact the author for shareware or commercial use). The credit it asks for:
+    "FAME Motorola 68000 Emulation Library by Oscar Orallo (oscar@m68k.com)".
+    genesis/port/k68 is an interpreter of its own that charges FAME's cycles; FAME itself is still
+    linked for the instructions k68 leaves to it.
+  * CZ80 Z80 emulator, (c) 2004-2005 Stephane Dallongeville (cpu/cz80; readme.txt: free for any
+    non-commercial project, with credit).
+  * YM2612 (sound/ym2612.c): from MAME's fm.c, (c) 1998 Tatsuyuki Satoh, 2001-2003 Jarek Burczynski,
+    MAME development; the MAME licence.
+  * SN76496 (sound/sn76496.c): MAME development; the MAME licence.
+Authors: genesis/picodrive/AUTHORS.
+
+----------------------------------------------------------------------------------------------
+PicoDrive's licence (genesis/picodrive/COPYING):
+
+
+ Redistribution and use of this code or any derivative works are permitted
+ provided that the following conditions are met:
+
+ * Redistributions may not be sold, nor may they be used in a commercial
+ product or activity.
+
+ * Redistributions that are modified from the original source must include the
+ complete source code, including the source code for all components used by a
+ binary built from the modified sources. However, as a special exception, the
+ source code distributed need not include anything that is normally distributed
+ (in either source or binary form) with the major components (compiler, kernel,
+ and so on) of the operating system on which the executable runs, unless that
+ component itself accompanies the executable.
+
+ * Redistributions must reproduce the above copyright notice, this list of
+ conditions and the following disclaimer in the documentation and/or other
+ materials provided with the distribution.
+
+ THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+ AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
+ LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ POSSIBILITY OF SUCH DAMAGE.

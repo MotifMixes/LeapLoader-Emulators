@@ -1,9 +1,10 @@
 #!/bin/sh
-# build.sh: builds the NES, Game Boy, GBA and SNES apps into package/NES, package/GB, package/GBA
-# and package/SNES, homebrew packages for LeapLoader (app.txt + code.bin + card/ folders).
+# build.sh: builds the NES, Game Boy, GBA, SNES and Genesis apps into package/NES, package/GB,
+# package/GBA, package/SNES and package/GENESIS, homebrew packages for LeapLoader (app.txt + code.bin
+# + card/ folders).
 #
 # Needs ARC GCC (the GNU toolchain for ARC, arc-elf32, -mcpu=arc600), a POSIX shell and, for
-# SNES, Python 3 (it generates parts of the SNES core in assembly). ARC=<prefix> picks the
+# SNES and Genesis, Python 3 (it generates parts of their cores, in assembly and in C). ARC=<prefix> picks the
 # toolchain (default: arc-elf32-), PYTHON the Python (default: python3, else python).
 #   ARC=/opt/arc/bin/arc-elf32- ./build.sh
 set -e
@@ -144,6 +145,54 @@ done
   -lm -lc -lgcc -Wl,--gc-sections -Wl,-Map="$R/build/snes.map"
 check snes
 
+# ---- Genesis / Mega Drive: PicoDrive 2.04 (the MAME licence: non-commercial use only) with LeapLoader's
+# speed work (genesis/port): a 68000 interpreter (k68) and a Z80 core in assembly, an assembly line
+# renderer writing the LCD, the YM2612/PSG loops in assembly, wait-loop skipping. All exact: the same
+# emulation as PicoDrive's C code, frame by frame. Experimental.
+G=$R/genesis; o=$R/build/genesis; rm -rf "$o"; mkdir -p "$o/core"
+cp -r "$G/picodrive" "$o/picodrive"; cp -r "$G/port" "$o/port"
+# the generated parts (in build/genesis/port): the 68000 interpreter (hot handlers first), the patched
+# YM2612/PSG, Cz80 with its idle-loop skips, the Z80 core in assembly, the VDP port with the renderer's
+# change stamps
+(cd "$o/port" &&
+ K68HOT=1 K68HOTF=hot5.txt K68SPLIT=100 K68POLL=1 K68IDLE2=1 K68TAIL=40 "$PY" -I k68/gen68.py k68/k68i.S > /dev/null &&
+ "$PY" -I ym/mkym.py && "$PY" -I z80/mkz80.py && "$PY" -I z80/mkz80x.py > /dev/null && "$PY" -I vp/mkvp.py)
+GD="-DEMU_F68K -D_USE_CZ80 -DNO_32X -DNO_SMS -I../picodrive -I../picodrive/pico -I../picodrive/pico/sound
+    -I../picodrive/zlib -I. -include port.h -w"
+GF="-mcpu=arc600 -mmul64 -mbarrel-shifter -mnorm -mswap -mno-sdata -O2 -fomit-frame-pointer -fno-branch-count-reg
+    -fno-common -fsigned-char -ffunction-sections -Wno-error=implicit-function-declaration -Wno-error=int-conversion
+    -Wno-error=incompatible-pointer-types $GD -DDIRECT -DARCDRAW -DK68"
+# the speed options (all exact; as the bench's best build, genesis/port and its NOTES: t6)
+GF="$GF -DYMX -DYMLOOP -DYMASM -DSNX -DZ80IDLE -DK68HOT -DOUTQ -DSNQ -DZ80POLL -DK68TAIL -DZ80ASM -DYMEG3 -DYMSCHED
+    -DSNASM -DLREUSE -DYMSETE -DZ80EI -DPLBW -DPSPR -DLRK2 -DPSPR2 -DVDPFAST -DK68IDLE2 -DPLPIPE -DK68POLL -DK68HOT5
+    -DFIXLD -DSHFAST -DK68IDLEJ -DNTMEMO -DZ80IDLE3 -DZ80DIA -DZ80IDLE4 -DFSKIP=2"
+(cd "$o/port" &&
+ for f in pico/pico pico/cart pico/memory pico/sek pico/z80if pico/misc pico/eeprom pico/carthw/carthw \
+          pico/carthw/eeprom_spi pico/sound/sound pico/sound/mix; do
+   "$CC" "../picodrive/$f.c" "$o/core/${f##*/}.o" $GF &
+ done
+ for f in vp/videoport arcdraw/drawx ym/ym_patched ym/sn_patched z80/cz80 k68/k68c z80/ymwait stubs; do
+   "$CC" "$f.c" "$o/core/${f##*/}.o" $GF &
+ done
+ for f in ym/ymx z80/z80x ym/sn k68/k68i arcdraw/arcdraw arcdraw/shfast k68/k68ij; do
+   "${ARC}gcc" $GF -c "$f.S" -o "$o/core/${f##*/}.o" &
+ done
+ wait
+ "$CC" "$G/console/console.c" "$o/console.o" $GF
+ "$CC" "$G/console/libc.c" "$o/libc.o" $GF -fno-builtin
+ "$CC" "$G/console/llfloat.c" "$o/llfloat.o" $GF -fno-builtin)
+# libgcc's fp-bit.o/dp-bit.o with their symbols weakened: llfloat.c's divisions (no lp loops) replace theirs
+for m in fp dp; do
+  (cd "$o" && "${ARC}ar" x "$LIBGCC" $m-bit.o &&
+   "${ARC}objcopy" $("${ARC}nm" -g --defined-only $m-bit.o | awk '{printf " --weaken-symbol=%s", $3}') $m-bit.o ${m}bitw.o &&
+   rm -f $m-bit.o)
+done
+"${ARC}gcc" -mcpu=arc600 -c "$G/console/entry.S" -o "$o/entry.o"
+"${ARC}gcc" $LINK -T "$G/console/link.ld" -o "$R/build/genesis.elf" "$o/entry.o" "$o/console.o" "$o/libc.o" \
+  "$o/llfloat.o" "$o/fpbitw.o" "$o/dpbitw.o" "$o"/core/*.o \
+  -lm -lc -lgcc -Wl,--gc-sections -Wl,-Map="$R/build/genesis.map"
+check genesis
+
 # ---- the packages
 VERSION=$(cat "$R/VERSION")
 p=$R/package/NES; rm -rf "$p"; mkdir -p "$p/card/NES"
@@ -183,4 +232,10 @@ version=%s
 printf 'Put Super Nintendo games (.sfc, .smc) here.
 ' > "$p/card/SNES/Put SNES games here.txt"
 
-ls -l "$R/package/NES/code.bin" "$R/package/GB/code.bin" "$R/package/GBA/code.bin" "$R/package/SNES/code.bin" | awk '{print $NF, $5}'
+p=$R/package/GENESIS; rm -rf "$p"; mkdir -p "$p/card/GENESIS"
+cp "$R/build/genesis.bin" "$p/code.bin"
+cp "$R/genesis/LICENSE.txt" "$p/LICENSE.txt"
+printf 'name=Genesis\nid=GENESIS\ncode=code.bin\nauthor=LeapLoader-Emulators (PicoDrive, non-commercial) - experimental\nversion=%s\n' "$VERSION" > "$p/app.txt"
+printf 'Put Genesis / Mega Drive games (.md, .bin, .gen, .smd) here.\n' > "$p/card/GENESIS/Put Genesis games here.txt"
+
+ls -l "$R/package/NES/code.bin" "$R/package/GB/code.bin" "$R/package/GBA/code.bin" "$R/package/SNES/code.bin" "$R/package/GENESIS/code.bin" | awk '{print $NF, $5}'

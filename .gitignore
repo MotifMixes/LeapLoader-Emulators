@@ -12,3 +12,9 @@ __pycache__/
 *.sfc
 *.smc
 *.srm
+*.gen
+*.smd
+# Genesis .md / .bin ROMs: only where games go (a GENESIS folder, a test card), so README.md files stay visible
+**/GENESIS/*.md
+**/GENESIS/*.bin
+**/card/**/*.md

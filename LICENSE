@@ -9,10 +9,15 @@ LeapLoader-Emulators: licences by part
               generators in snes/kern, the Super FX translator): the Snes9x licence,
               snes/LICENSE.txt: NON-COMMERCIAL use only, not the GPL. The libretro-common
               files in snes/s9x/libretro/libretro-common: their own licence (their headers)
+  genesis/    PicoDrive 2.04 and everything made for it there (the Genesis app, the 68000/Z80
+              cores in assembly and their generators in genesis/port, the renderer): PicoDrive's
+              licence (the MAME licence), genesis/LICENSE.txt: NON-COMMERCIAL use only, not the
+              GPL. Its components FAME (68000), CZ80 (Z80), the YM2612 and SN76496 code (MAME):
+              their own non-commercial terms, listed in genesis/LICENSE.txt
   the rest    (nes/console, gb/console, gba/console, common, build.sh, cc.sh): the zlib licence below
 
 The built apps are distributed under their core's licence: GNU GPL 2 (NES, Game Boy, GBA), the
-Snes9x licence (SNES: non-commercial).
+Snes9x licence (SNES: non-commercial), PicoDrive's licence (Genesis: non-commercial).
 
 ----------------------------------------------------------------------------------------------
 Copyright (c) 2026 MotifMixes
